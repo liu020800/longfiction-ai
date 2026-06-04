@@ -15,3 +15,10 @@ setuptools<81
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.5.0
 bcrypt>=4.0.0
+
+# Optional: BM25 keyword search for RAG 2.0
+# If not installed, BM25Searcher falls back to a simple TF-IDF implementation
+rank-bm25>=0.2.2
+
+# Development dependencies (optional)
+# pip install pytest pytest-asyncio pytest-cov black flake8 mypy
