@@ -1,70 +1,143 @@
+"""风格迁移器。
+
+将文本从一种风格迁移到另一种风格。
+"""
+from __future__ import annotations
+
 import logging
+from dataclasses import dataclass
 from typing import Optional
+
+from agents.style_controller import (
+    StyleProfile,
+    StyleFeatures,
+    extract_style_features,
+    style_features_to_prompt,
+    style_distance,
+)
 from core.llm_router import call_llm, TaskType
-from core.word_counter import count_chinese_words, _split_sentences
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_MIGRATION_SYSTEM = """你是一位风格迁移专家。你需要将文本从一种风格迁移到另一种风格，同时完整保留情节骨架和人物设定。
-要求：
-- 保留所有冲突事件、角色行为、世界规则
-- 只调整语言风格维度（句式、用词、节奏、修辞）
-- 不改变情节走向和因果关系
-- 直接输出迁移后的完整文本"""
+
+@dataclass
+class MigrationResult:
+    """迁移结果。"""
+    original_text: str
+    migrated_text: str
+    source_style: str
+    target_style: str
+    original_features: StyleFeatures
+    new_features: StyleFeatures
+    style_distance_before: float
+    style_distance_after: float
 
 
 class StyleMigrator:
-    def __init__(self):
-        self.plot_threshold = getattr(settings, 'STYLE_MIGRATION_PLOT_THRESHOLD', 0.7)
+    """风格迁移器。"""
+
+    def __init__(self, llm_call=None):
+        self.llm_call = llm_call or self._default_llm_call
+
+    async def _default_llm_call(self, prompt: str, system: str = "") -> str:
+        return await call_llm(TaskType.REWRITE, prompt, system=system, temperature=0.6)
 
     async def migrate(
         self,
         text: str,
-        target_style_name: str,
-        target_style_desc: str = "",
-        source_style_desc: str = "",
-    ) -> str:
-        if not text or count_chinese_words(text) < 50:
-            return text
+        source_style: StyleProfile,
+        target_style: StyleProfile,
+        preserve_content: bool = True,
+    ) -> MigrationResult:
+        """风格迁移。"""
+        if not text:
+            return MigrationResult(
+                original_text="",
+                migrated_text="",
+                source_style=source_style.name,
+                target_style=target_style.name,
+                original_features=StyleFeatures(),
+                new_features=StyleFeatures(),
+                style_distance_before=0.0,
+                style_distance_after=0.0,
+            )
 
-        prompt = f"""请将以下文本从「{source_style_desc or "当前风格"}」迁移到「{target_style_name}」风格。
+        original_features = extract_style_features(text)
+        distance_before = style_distance(original_features, target_style.features)
 
-目标风格描述：{target_style_desc}
-
-严格要求：
-1. 完整保留所有情节事件和人物行为，一个事件都不能删
-2. 只调整风格维度：句式选择、用词偏好、叙事节奏、修辞方式
-3. 保持人物性格和对话口吻与风格一致
-4. 不改变因果关系和事件顺序
-
-原文：
-{text}"""
+        # 构造 prompt
+        system = (
+            "你是一位资深文学编辑，擅长在保留原文核心叙事和情节的前提下，"
+            "将文本改写为指定的风格。"
+        )
+        source_desc = style_features_to_prompt(source_style)
+        target_desc = style_features_to_prompt(target_style)
+        content_rule = (
+            "严格保留原文的核心事件、人物对白顺序和关键信息，不能改变故事情节。"
+            if preserve_content else
+            "可以适度调整表达以符合目标风格。"
+        )
+        prompt = (
+            f"请将以下文本从「{source_style.name}」风格迁移到「{target_style.name}」风格。\n\n"
+            f"## 源风格指南\n{source_desc}\n\n"
+            f"## 目标风格指南\n{target_desc}\n\n"
+            f"## 要求\n{content_rule}\n"
+            f"重点调整：\n"
+            f"- 句式节奏（长短句比例）\n"
+            f"- 对话与描写的占比\n"
+            f"- 词汇风格（更口语/更书面）\n"
+            f"- 修辞手法\n\n"
+            f"## 原文\n{text}\n\n"
+            f"## 改写后正文\n"
+        )
 
         try:
-            migrated = await call_llm(
-                TaskType.REWRITE, prompt,
-                system=_MIGRATION_SYSTEM,
-                temperature=0.6,
-                max_tokens=len(text) * 2,
-            )
-            if not migrated or count_chinese_words(migrated) < count_chinese_words(text) * 0.7:
-                logger.warning("Migrated text too short, keeping original")
-                return text
-            return migrated
+            migrated = await self.llm_call(prompt, system=system)
         except Exception as e:
-            logger.warning(f"Style migration failed: {e}")
+            logger.error(f"Style migration failed: {e}")
+            migrated = text  # 失败则返回原文
+
+        new_features = extract_style_features(migrated)
+        distance_after = style_distance(new_features, target_style.features)
+
+        return MigrationResult(
+            original_text=text,
+            migrated_text=migrated,
+            source_style=source_style.name,
+            target_style=target_style.name,
+            original_features=original_features,
+            new_features=new_features,
+            style_distance_before=distance_before,
+            style_distance_after=distance_after,
+        )
+
+    async def migrate_to_natural(
+        self,
+        text: str,
+        target_style: str = "web_novel",
+    ) -> str:
+        """将 AI 生成的文本迁移到更自然的风格。"""
+        from agents.style_controller import get_style_profile
+        target = get_style_profile(target_style)
+        if target is None:
+            logger.warning(f"Unknown target style: {target_style}")
             return text
 
-    def check_plot_skeleton(self, original: str, migrated: str) -> float:
-        orig_keywords = set()
-        for kw in ["冲突", "战斗", "发现", "真相", "暴露", "背叛", "联盟", "死亡", "复活", "获得", "失去", "修炼", "突破"]:
-            if kw in original:
-                orig_keywords.add(kw)
-
-        if not orig_keywords:
-            return 1.0
-
-        retained = sum(1 for kw in orig_keywords if kw in migrated)
-        similarity = retained / len(orig_keywords)
-        return similarity
+        # 构造"去 AI 化"prompt
+        prompt = (
+            f"请将以下文本改写，使其更自然、更不像 AI 生成。\n\n"
+            f"目标风格：{target.description}\n\n"
+            f"特别要求：\n"
+            f"1. 删除所有'心中涌起'、'瞳孔骤缩'、'嘴角微微上扬'等 AI 套话\n"
+            f"2. 用具体动作和细节代替抽象心理描写\n"
+            f"3. 长短句交替，避免连续短句或连续长句\n"
+            f"4. 对话要有区分度，不同角色说话方式要不同\n"
+            f"5. 保留原文所有情节和对白，不能删除任何信息\n\n"
+            f"## 原文\n{text}\n\n"
+            f"## 改写后正文\n"
+        )
+        try:
+            return await self.llm_call(prompt, system="你是一位文学编辑。")
+        except Exception as e:
+            logger.error(f"De-AI migration failed: {e}")
+            return text

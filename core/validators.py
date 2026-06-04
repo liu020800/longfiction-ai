@@ -1,315 +1,399 @@
-"""程序级输出质量门。
+"""JSON 解析与数据验证工具。
 
-P2 修复：在生成流程末端提供一个只读、可测试的最终质量门。
-- `OutputValidationError`: 验证失败时抛出的异常
-- `OutputValidator`: 聚合多个质量检查（标题、字数、截断、AI 痕迹、跨章相似度）
-- `TitleSanitizer`: 无 LLM 的标题清洗（剥除脏词、长度规范化）
-
-设计原则：
-1. **只读**：验证器不修改文本，所有改写由 `_post_generation_recovery`/`dilute_ai_traces` 等修复层负责
-2. **可测试**：所有检查是纯函数，无 I/O、无 LLM 调用
-3. **可配置**：通过构造函数参数注入阈值，便于在不同场景下复用
-4. **复用优先**：标题脏词检测复用 `PlannerAgent._is_dirty_title`、截断检测复用 `WriterAgent._is_truncated_ending`、相似度复用 `WriterAgent._is_too_similar`，不重新实现
-
-使用方式：
-    from core.validators import OutputValidator, OutputValidationError
-    validator = OutputValidator(ai_trace_phrases=settings.AI_TRACE_PHRASES, ...)
-    validator.validate_all(title=..., content=..., target_words=..., is_last_chapter=False, previous_ending="")
-    # 无违规时不抛错；有违规时抛 OutputValidationError
+增强 LLM 输出的 JSON 解析容错能力。
 """
 from __future__ import annotations
 
+import json
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+import re
+from dataclasses import dataclass
+from typing import Any, Optional, Type, TypeVar
 
-logger = logging.getLogger("validators")
+from pydantic import BaseModel, ValidationError
 
+logger = logging.getLogger(__name__)
 
-class OutputValidationError(Exception):
-    """最终输出质量门未通过。
-
-    Attributes:
-        violations: 违规描述列表（每项为可读中文短句）
-        category: 违规分类，取值 'title' | 'word_count' | 'truncation' | 'ai_trace' | 'similarity' | 'mixed'
-        recoverable: 是否可重试。False 表示这是配置/数据问题，不应通过重试解决
-    """
-
-    def __init__(self, violations: list[str], category: str = "mixed", recoverable: bool = True):
-        self.violations = violations
-        self.category = category
-        self.recoverable = recoverable
-        super().__init__(f"OutputValidationError[{category}]: {'；'.join(violations)}")
+T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass
-class OutputValidator:
-    """纯函数式最终质量门。失败抛 OutputValidationError。"""
-
-    # 必填：从 settings 注入
-    ai_trace_phrases: list[str] = field(default_factory=list)
-    ai_trace_max: int = 3
-    # 字数阈值
-    word_count_lower_pct: float = 0.85        # 普通章
-    word_count_lower_pct_last: float = 0.95   # 末章（高潮必须达标）
-    word_count_absolute_min: int = 200        # 绝对下限（硬地板）
-    # AI 痕迹密度（每千字）
-    ai_trace_density_limit: float = 1.5
-    # 跨章相似度（Jaccard）
-    similarity_threshold: float = 0.5
-
-    # ---- 标题检查 ----
-    def validate_title(self, title: str) -> list[str]:
-        """脏词标题检查。复用 PlannerAgent.DIRTY_TITLE_PATTERNS。
-
-        直接读类属性而非调实例方法，避免对 planner_agent 实例化产生依赖。
-        """
-        if not title or not title.strip():
-            return ["标题为空"]
-        # 延迟导入避免循环依赖
-        from agents.planner_agent import PlannerAgent
-        patterns = PlannerAgent.DIRTY_TITLE_PATTERNS
-        if len(title.strip()) <= 2:
-            return [f"标题过短: '{title}'"]
-        for pat in patterns:
-            if pat in title:
-                return [f"标题包含脏词 '{pat}': '{title}'"]
-        return []
-
-    # ---- 字数检查 ----
-    def validate_word_count(self, text: str, target: int, *, is_last_chapter: bool = False) -> list[str]:
-        from core.word_counter import count_chinese_words
-        words = count_chinese_words(text or "")
-        # 绝对下限
-        if words < self.word_count_absolute_min:
-            return [f"字数 {words} 低于绝对下限 {self.word_count_absolute_min}"]
-        if target <= 0:
-            return []  # 未指定目标字数时不校验比例
-        lower_pct = self.word_count_lower_pct_last if is_last_chapter else self.word_count_lower_pct
-        required = int(target * lower_pct)
-        if words < required:
-            tag = "末章" if is_last_chapter else "本章"
-            return [f"{tag}字数 {words} 低于目标 {target} 的 {int(lower_pct*100)}%（需 {required}）"]
-        return []
-
-    # ---- 截断检查 ----
-    def validate_truncation(self, text: str) -> list[str]:
-        from agents.writer_agent import WriterAgent
-        if WriterAgent._is_truncated_ending(text or ""):
-            return ["章节末尾未以正常标点结尾（疑似截断）"]
-        return []
-
-    # ---- AI 痕迹检查 ----
-    def validate_ai_traces(self, text: str) -> list[str]:
-        violations: list[str] = []
-        if not text:
-            return violations
-        # 1) 短语硬阈值
-        for phrase in self.ai_trace_phrases:
-            count = text.count(phrase)
-            if count > self.ai_trace_max:
-                violations.append(
-                    f"AI 痕迹短语 '{phrase}' 出现 {count} 次（> {self.ai_trace_max}）"
-                )
-        # 2) 密度（每千字）
-        from core.word_counter import count_chinese_words
-        words = count_chinese_words(text)
-        if words > 0:
-            total_traces = sum(text.count(p) for p in self.ai_trace_phrases)
-            density = total_traces / (words / 1000.0)
-            if density > self.ai_trace_density_limit:
-                violations.append(
-                    f"AI 痕迹密度 {density:.2f}/千字 超过 {self.ai_trace_density_limit}"
-                )
-        return violations
-
-    # ---- 标题唯一性检查（跨章）----
-    # 短标题允许长度（避免 2-3 字短标题被无意义地拒绝）
-    title_uniqueness_min_length: int = 3
-    # 与最近 N 章做前缀比对（捕捉"扩大组织、"这种 stage 坍缩）
-    title_uniqueness_recent_window: int = 5
-    # 标题"主体"前缀比对长度（剥除"第N章 "后的核心前缀）
-    title_uniqueness_core_prefix_len: int = 3
-
-    @staticmethod
-    def _strip_chapter_number(title: str) -> str:
-        """剥除"第N章 "前缀，返回纯标题主体。"""
-        import re
-        m = re.match(r"^\s*第\s*\d+\s*章\s*", title)
-        return title[m.end():] if m else title
-
-    def validate_title_uniqueness(
-        self, title: str, previous_titles: Optional[list[str]]
-    ) -> list[str]:
-        """跨章标题唯一性检查。复检两道：
-
-        1) **精确重复**：当前标题在历史标题列表里完全相同
-        2) **前缀坍缩**：剥除"第N章 "后，标题主体前 K 字与最近 N 章任一标题主体相同
-           （捕捉"扩大组织·初现/暗涌/试探"这种 stage 桶坍缩）
-        """
-        if not title or not previous_titles:
-            return []
-        t = title.strip()
-        if len(t) < self.title_uniqueness_min_length:
-            return []  # 短标题不强制唯一
-
-        # 1) 精确重复
-        prev_stripped = [p.strip() for p in previous_titles if p and p.strip()]
-        if t in prev_stripped:
-            return [f"标题与历史章节重复: '{t}'"]
-
-        # 2) 前缀坍缩：仅看最近 N 章；先剥"第N章 "再比核心前缀
-        window = prev_stripped[-self.title_uniqueness_recent_window :]
-        t_core = self._strip_chapter_number(t)
-        k = self.title_uniqueness_core_prefix_len
-        for prev in window:
-            prev_core = self._strip_chapter_number(prev)
-            if (
-                len(t_core) >= k
-                and len(prev_core) >= k
-                and t_core[:k] == prev_core[:k]
-            ):
-                return [f"标题与近章高度相似（前缀坍缩）: '{t}' ≈ '{prev}'"]
-        return []
-
-    # ---- 跨章相似度检查 ----
-    def validate_similarity(self, text: str, previous_ending: Optional[str]) -> list[str]:
-        if not text or not previous_ending:
-            return []
-        from agents.writer_agent import WriterAgent
-        # _is_too_similar 是实例方法。构造一个无依赖临时实例。
-        agent = WriterAgent.__new__(WriterAgent)
-        if agent._is_too_similar(text, previous_ending, threshold=self.similarity_threshold):
-            return [f"与上一章结尾相似度超过 {self.similarity_threshold}（疑似重复开场）"]
-        return []
-
-    # ---- 聚合 ----
-    def validate_all(
-        self,
-        *,
-        title: str,
-        content: str,
-        target_words: int = 0,
-        is_last_chapter: bool = False,
-        previous_ending: Optional[str] = None,
-        previous_titles: Optional[list[str]] = None,
-    ) -> None:
-        """聚合所有检查。违规时抛 OutputValidationError；无违规时不抛错。
-
-        Args:
-            title: 章节标题
-            content: 章节正文
-            target_words: 目标字数（0 表示跳过比例检查）
-            is_last_chapter: 是否为最后一章
-            previous_ending: 上一章最后若干字（用于跨章相似度检查；空字符串或 None 跳过）
-            previous_titles: 历史章节标题列表（用于跨章唯一性检查；空列表/None 跳过）
-        """
-        violations: list[str] = []
-        category_counts: dict[str, int] = {}
-
-        for cat, vlist in [
-            ("title", self.validate_title(title)),
-            ("title_unique", self.validate_title_uniqueness(title, previous_titles)),
-            ("word_count", self.validate_word_count(content or "", target_words, is_last_chapter=is_last_chapter)),
-            ("truncation", self.validate_truncation(content or "")),
-            ("ai_trace", self.validate_ai_traces(content or "")),
-            ("similarity", self.validate_similarity(content or "", previous_ending)),
-        ]:
-            for v in vlist:
-                violations.append(v)
-                category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        if not violations:
-            return
-
-        # 选择 category：以数量最多的类目为主；并列时优先选"title_unique"（对目录可读性最关键）
-        # 然后按声明顺序：title → title_unique → word_count → ...
-        _CATEGORY_PRIORITY = ["title_unique", "title", "word_count", "truncation", "ai_trace", "similarity"]
-        if not category_counts:
-            category = "mixed"
-        else:
-            max_count = max(category_counts.values())
-            tied = [c for c, n in category_counts.items() if n == max_count]
-            # 在并列里按 _CATEGORY_PRIORITY 选优先级最高的
-            category = next((c for c in _CATEGORY_PRIORITY if c in tied), tied[0])
-        # 不可恢复的情况：空内容（任何修复都不可能补出）
-        recoverable = bool((content or "").strip()) and len(content or "") >= 50
-        raise OutputValidationError(violations=violations, category=category, recoverable=recoverable)
+class ParseResult:
+    """解析结果。"""
+    success: bool
+    value: Any = None
+    error: Optional[str] = None
+    recovered: bool = False  # 是否经过修复
+    strategy: str = "exact"  # 使用的解析策略
 
 
-@dataclass
-class TitleSanitizer:
-    """无 LLM 的标题清洗。
+# ============== JSON 修复工具 ==============
 
-    用于在 LLM 标题生成失败或输出仍含脏词时，剥除脏词得到一个可用的回退标题。
+def _strip_code_fence(text: str) -> str:
+    """剥离 markdown 代码块标记。"""
+    text = text.strip()
+    # ```json ... ```
+    m = re.search(r"```(?:json|JSON)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # 裸 ``` 包裹
+    m = re.search(r"```(.*?)```", text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return text
 
-    使用方式：
-        sanitizer = TitleSanitizer()
-        safe_title = sanitizer.clean("主角离开安全区", chapter_index=13)
-        # -> "安全区"（剥除前缀"主角"）
+
+def _strip_thinking_blocks(text: str) -> str:
+    """剥离推理/思考块（DeepSeek-R1 等模型会输出）。"""
+    # 剥离 <think>...</think>
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<thinking\b[^>]*>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 剥离 ```{thinking}...```
+    text = re.sub(r"```(?:thinking|reasoning|analysis)\s*\n?.*?\n?```", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
+
+
+def _find_json_boundaries(text: str) -> Optional[tuple[int, int]]:
+    """查找 JSON 对象的开始和结束位置。"""
+    # 找到第一个 { 或 [
+    starts = [i for i, ch in enumerate(text) if ch in "{["]
+    if not starts:
+        return None
+    start = starts[0]
+    # 找到匹配的 } 或 ]
+    open_count = 0
+    in_string = False
+    escape_next = False
+    open_ch = text[start]
+    close_ch = "}" if open_ch == "{" else "]"
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == open_ch:
+            open_count += 1
+        elif ch == close_ch:
+            open_count -= 1
+            if open_count == 0:
+                return (start, i)
+    return None
+
+
+def _fix_trailing_comma(text: str) -> str:
+    """修复 JSON 中的尾随逗号。"""
+    # 移除 ,] 或 ,} 这种尾随逗号
+    text = re.sub(r",\s*([\]\}])", r"\1", text)
+    return text
+
+
+def _fix_unquoted_keys(text: str) -> str:
+    """修复未加引号的 JSON key（仅处理简单的 key 形式）。"""
+    # 匹配 {"key": 这种结构的 key 部分
+    # 仅处理 key 是合法标识符的情况
+    pattern = re.compile(r'([\{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:')
+    return pattern.sub(r'\1"\2":', text)
+
+
+def _fix_single_quotes(text: str) -> str:
+    """修复单引号字符串为双引号。"""
+    # 简单替换：把 'xxx' 转为 "xxx"
+    # 注意：这只在 LLM 输出确实错误使用单引号时才有意义
+    # 风险：内容包含撇号会误伤。需要先识别 JSON 边界
+    # 简化为：仅在明显是 JSON 字符串边界时替换
+    return re.sub(r"'([^'\n]*)'", r'"\1"', text)
+
+
+def _escape_newlines_in_strings(text: str) -> str:
+    """转义字符串内的裸换行符。
+
+    LLM 经常在 JSON 字符串中输出真正的换行符，这是不合法的。
     """
+    # 找到 "..." 字符串，对内部的真实换行做转义
+    out = []
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            out.append(ch)
+            escape_next = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ch == "\n":
+            out.append("\\n")
+            continue
+        if in_string and ch == "\r":
+            out.append("\\r")
+            continue
+        if in_string and ch == "\t":
+            out.append("\\t")
+            continue
+        out.append(ch)
+    return "".join(out)
 
-    max_title_length: int = 6
-    min_title_length: int = 2
 
-    def clean(self, title: str, *, chapter_index: Optional[int] = None) -> str:
-        """清洗标题。
+def _remove_comments(text: str) -> str:
+    """移除 JSON 中的 // 和 /* */ 注释。"""
+    # /* ... */
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    # // ...
+    text = re.sub(r"//[^\n]*", "", text)
+    return text
 
-        步骤：
-        1. 去除空白
-        2. 剥除 DIRTY_TITLE_PATTERNS 中所有模式（从前缀和后缀方向）
-        3. 长度规范化：超长截断、过短补"第N章"占位
-        4. 若仍为空，用 `第{idx+1}节` 兜底
-        """
-        if not title:
-            return self._fallback(chapter_index)
 
-        text = title.strip()
-        if not text:
-            return self._fallback(chapter_index)
+def _normalize_unicode_quotes(text: str) -> str:
+    """将中文/智能引号统一为标准引号。"""
+    return (
+        text
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
 
-        # 延迟导入
-        from agents.planner_agent import PlannerAgent
-        patterns = PlannerAgent.DIRTY_TITLE_PATTERNS
 
-        # 反复剥除前缀和后缀中的脏词模式（最多 5 轮，防止异常输入死循环）
-        for _ in range(5):
-            changed = False
-            for pat in patterns:
-                if text.startswith(pat):
-                    text = text[len(pat):]
-                    changed = True
-                if text.endswith(pat):
-                    text = text[: -len(pat)] if len(text) > len(pat) else ""
-                    changed = True
-            if not changed:
-                break
+# ============== 主解析函数 ==============
 
-        text = text.strip()
-        if not text:
-            return self._fallback(chapter_index)
+def parse_json_strict(text: str) -> ParseResult:
+    """严格 JSON 解析（不修复）。"""
+    try:
+        return ParseResult(success=True, value=json.loads(text), strategy="strict")
+    except json.JSONDecodeError as e:
+        return ParseResult(success=False, error=str(e), strategy="strict")
 
-        # 长度截断
-        if len(text) > self.max_title_length:
-            text = text[: self.max_title_length]
-        if len(text) < self.min_title_length:
-            # 太短，尝试补一个"第N章"占位
-            if chapter_index is not None:
-                return f"第{chapter_index + 1}章"
-            return text  # 至少返回非空
 
-        return text
+def parse_json_lenient(text: str) -> ParseResult:
+    """宽松 JSON 解析（多种修复策略）。
 
-    def _fallback(self, chapter_index: Optional[int]) -> str:
-        if chapter_index is not None:
-            return f"第{chapter_index + 1}节"
-        return "未命名章节"
+    依次尝试：
+    1. 剥离思考块
+    2. 剥离代码块标记
+    3. 标准化引号
+    4. 严格解析
+    5. 在原文寻找 JSON 边界再解析
+    6. 修复常见错误（尾随逗号、未加引号 key、单引号、字符串内换行）
+    7. 再次严格解析
+    """
+    if not text:
+        return ParseResult(success=False, error="Empty input", strategy="lenient")
 
-    def clean_batch(self, outlines: list) -> list:
-        """批量清洗 ChapterOutline 列表的 title 字段。原地修改并返回。"""
-        for i, outline in enumerate(outlines):
-            title = getattr(outline, "title", None) or ""
-            fixed = self.clean(title, chapter_index=i)
-            if hasattr(outline, "title"):
-                outline.title = fixed
-        return outlines
+    original = text
+    text = _strip_thinking_blocks(text)
+    text = _strip_code_fence(text)
+    text = _normalize_unicode_quotes(text)
+    text = text.strip()
+
+    # 策略 1: 直接解析
+    try:
+        return ParseResult(success=True, value=json.loads(text), strategy="direct")
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 2: 寻找 JSON 边界
+    boundaries = _find_json_boundaries(text)
+    if boundaries:
+        start, end = boundaries
+        candidate = text[start:end + 1]
+        try:
+            return ParseResult(
+                success=True,
+                value=json.loads(candidate),
+                recovered=True,
+                strategy="boundary_extract",
+            )
+        except json.JSONDecodeError:
+            pass
+
+    # 策略 3: 移除注释 + 修复尾随逗号
+    fixed = _remove_comments(text)
+    fixed = _fix_trailing_comma(fixed)
+    try:
+        return ParseResult(
+            success=True,
+            value=json.loads(fixed),
+            recovered=True,
+            strategy="fix_comments_trailing",
+        )
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 4: 修复未加引号 key
+    fixed2 = _fix_unquoted_keys(fixed)
+    try:
+        return ParseResult(
+            success=True,
+            value=json.loads(fixed2),
+            recovered=True,
+            strategy="fix_unquoted_keys",
+        )
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 5: 修复字符串内换行
+    fixed3 = _escape_newlines_in_strings(fixed2)
+    try:
+        return ParseResult(
+            success=True,
+            value=json.loads(fixed3),
+            recovered=True,
+            strategy="fix_newlines",
+        )
+    except json.JSONDecodeError:
+        pass
+
+    # 策略 6: 修复单引号
+    fixed4 = _fix_single_quotes(fixed3)
+    try:
+        return ParseResult(
+            success=True,
+            value=json.loads(fixed4),
+            recovered=True,
+            strategy="fix_single_quotes",
+        )
+    except json.JSONDecodeError as e:
+        return ParseResult(
+            success=False,
+            error=f"All strategies failed. Last error: {e}",
+            strategy="all_failed",
+        )
+
+
+def parse_json(text: str, lenient: bool = True) -> ParseResult:
+    """统一的 JSON 解析入口。
+
+    Args:
+        text: 待解析的文本
+        lenient: 是否使用宽松模式
+
+    Returns:
+        ParseResult
+    """
+    if lenient:
+        return parse_json_lenient(text)
+    return parse_json_strict(text)
+
+
+def validate_with_model(data: Any, model_class: Type[T]) -> T:
+    """使用 Pydantic 模型验证数据。
+
+    Args:
+        data: 待验证的数据（通常是解析后的 dict/list）
+        model_class: 目标 Pydantic 模型类
+
+    Returns:
+        验证后的模型实例
+
+    Raises:
+        ValueError: 验证失败
+    """
+    try:
+        return model_class.model_validate(data)
+    except ValidationError as e:
+        # 提供更详细的错误信息
+        errors = []
+        for err in e.errors():
+            loc = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{loc}: {err['msg']}")
+        raise ValueError(f"Validation failed for {model_class.__name__}: {'; '.join(errors)}")
+
+
+def parse_json_with_model(
+    text: str,
+    model_class: Type[T],
+    lenient: bool = True,
+) -> tuple[Optional[T], Optional[str]]:
+    """解析 JSON 并直接验证为 Pydantic 模型。
+
+    Args:
+        text: LLM 输出的 JSON 文本
+        model_class: 目标模型
+        lenient: 是否宽松解析
+
+    Returns:
+        (model_instance, error_message)
+    """
+    result = parse_json(text, lenient=lenient)
+    if not result.success:
+        return None, result.error
+    try:
+        return validate_with_model(result.value, model_class), None
+    except ValueError as e:
+        return None, str(e)
+
+
+def extract_json_block(text: str) -> Optional[str]:
+    """从文本中提取 JSON 代码块（不解析）。"""
+    text = _strip_thinking_blocks(text)
+    # 优先匹配 ```json ... ```
+    m = re.search(r"```(?:json|JSON)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # 其次匹配裸 JSON
+    boundaries = _find_json_boundaries(text)
+    if boundaries:
+        start, end = boundaries
+        return text[start:end + 1]
+    return None
+
+
+# ============== 内容验证 ==============
+
+def validate_chapter_content(content: str, min_length: int = 100) -> tuple[bool, str]:
+    """验证章节内容。
+
+    Args:
+        content: 章节内容
+        min_length: 最小字符数
+
+    Returns:
+        (is_valid, reason)
+    """
+    if not content:
+        return False, "内容为空"
+    content = content.strip()
+    if len(content) < min_length:
+        return False, f"内容过短（{len(content)} < {min_length} 字符）"
+    return True, "ok"
+
+
+def validate_title(title: str) -> tuple[bool, str]:
+    """验证章节标题。"""
+    if not title or not title.strip():
+        return False, "标题为空"
+    title = title.strip()
+    if len(title) < 2:
+        return False, "标题过短（< 2 字符）"
+    if len(title) > 100:
+        return False, "标题过长（> 100 字符）"
+    return True, "ok"
+
+
+# ============== 调试辅助 ==============
+
+def debug_parse_failure(text: str) -> dict:
+    """生成解析失败的调试信息。"""
+    return {
+        "input_length": len(text),
+        "input_preview": text[:500],
+        "input_suffix": text[-200:] if len(text) > 500 else "",
+        "thinking_blocks_found": bool(re.search(r"<think", text, re.IGNORECASE)),
+        "code_fence_found": "```" in text,
+        "smart_quotes_found": any(c in text for c in "\u201c\u201d\u2018\u2019"),
+        "brace_count_open": text.count("{"),
+        "brace_count_close": text.count("}"),
+    }

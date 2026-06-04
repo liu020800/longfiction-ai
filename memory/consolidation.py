@@ -1,190 +1,146 @@
+"""记忆整合。
+
+定期将分散的记忆整合为更结构化的形式：
+- 短期记忆 → 结构化记忆
+- 散乱的事实 → 关系图谱
+- 旧的长期记忆 → 分层摘要
+"""
+from __future__ import annotations
+
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Optional
-from memory.working_memory import WorkingMemory, SceneContext
-from memory.short_term import ShortTermMemory
-from memory.long_term import LongTermMemory
-from memory.structured import StructuredMemory
-from core.config import settings
+
+from memory.working_memory import WorkingMemory
+from memory.relationship_graph import RelationshipGraph, RelationType
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ConsolidationCandidate:
-    text: str
-    source: str
-    importance: float = 0.5
-    embedding: Optional[list] = None
-    meta: dict = field(default_factory=dict)
+class ConsolidationResult:
+    """整合结果。"""
+    facts_extracted: int = 0
+    relations_updated: int = 0
+    events_recorded: int = 0
+    working_memory_items: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
-class ImportanceScorer:
-    CHAR_EVENT_KEYWORDS = ["突破", "死亡", "觉醒", "背叛", "结盟", "分离", "重逢", "变身", "晋级", "失败"]
-    PLOT_KEYWORDS = ["秘密", "真相", "伏笔", "线索", "转折", "危机", "决战", "阴谋", "预言", "契约"]
-    EMOTION_KEYWORDS = ["震惊", "愤怒", "悲伤", "狂喜", "恐惧", "绝望", "希望", "感动"]
+class MemoryConsolidator:
+    """记忆整合器。
 
-    def score(self, text: str, context: dict = None) -> float:
-        context = context or {}
-        base = 0.3
-        char_hits = sum(1 for kw in self.CHAR_EVENT_KEYWORDS if kw in text)
-        plot_hits = sum(1 for kw in self.PLOT_KEYWORDS if kw in text)
-        emotion_hits = sum(1 for kw in self.EMOTION_KEYWORDS if kw in text)
+    定期执行整合操作，将短期/工作记忆中的信息沉淀到长期结构。
+    """
 
-        char_boost = min(char_hits * 0.15, 0.3)
-        plot_boost = min(plot_hits * 0.12, 0.25)
-        emotion_boost = min(emotion_hits * 0.08, 0.15)
-
-        if context.get("is_climax"):
-            base += 0.15
-        if context.get("has_new_character"):
-            base += 0.1
-        if context.get("foreshadow_planted"):
-            base += 0.1
-        if context.get("foreshadow_resolved"):
-            base += 0.12
-
-        return min(1.0, base + char_boost + plot_boost + emotion_boost)
-
-
-class MemoryConsolidation:
     def __init__(
         self,
-        working_memory: WorkingMemory,
-        short_term: ShortTermMemory,
-        long_term: LongTermMemory,
-        structured: StructuredMemory,
-        embed_fn=None,
+        working_memory: Optional[WorkingMemory] = None,
+        relationship_graph: Optional[RelationshipGraph] = None,
+        structured_memory=None,  # StructuredMemory 实例
     ):
-        self.wm = working_memory
-        self.stm = short_term
-        self.ltm = long_term
-        self.structured = structured
-        self.embed_fn = embed_fn
-        self.scorer = ImportanceScorer()
-        self._pending: list[ConsolidationCandidate] = []
+        self.working = working_memory or WorkingMemory()
+        self.graph = relationship_graph or RelationshipGraph()
+        self.structured = structured_memory
 
-    def extract_from_working_memory(self, chapter_content: str = "", chapter_idx: int = 0) -> list[ConsolidationCandidate]:
-        candidates = []
-        scene = self.wm.scene
+    async def consolidate_chapter(
+        self,
+        chapter_index: int,
+        chapter_content: str,
+        chapter_summary: str,
+    ) -> ConsolidationResult:
+        """整合一章内容的记忆。"""
+        import asyncio
+        result = ConsolidationResult()
 
-        if scene.present_characters and scene.location:
-            text = f"第{chapter_idx}章场景: {', '.join(scene.present_characters)} 在 {scene.location}"
-            if scene.emotional_state and scene.emotional_state != "neutral":
-                text += f", 情绪基调: {scene.emotional_state}"
-            candidates.append(ConsolidationCandidate(
-                text=text,
-                source="working_memory",
-                meta={"type": "scene_snapshot", "chapter": chapter_idx},
-            ))
+        try:
+            # 1. 工作记忆统计
+            result.working_memory_items = len(self.working)
 
-        if scene.active_foreshadowing:
-            for fs in scene.active_foreshadowing:
-                candidates.append(ConsolidationCandidate(
-                    text=f"活跃伏笔(第{chapter_idx}章): {fs}",
-                    source="working_memory",
-                    importance=0.7,
-                    meta={"type": "foreshadowing", "chapter": chapter_idx},
-                ))
-
-        for c in candidates:
-            c.importance = self.scorer.score(c.text, {"chapter": chapter_idx})
-
-        return candidates
-
-    def extract_from_chapter(self, chapter_content: str, chapter_title: str, chapter_idx: int, context: dict = None) -> list[ConsolidationCandidate]:
-        context = context or {}
-        candidates = []
-
-        summary_text = chapter_content[:600] if len(chapter_content) > 600 else chapter_content
-        importance = self.scorer.score(chapter_content, context)
-
-        candidates.append(ConsolidationCandidate(
-            text=f"【{chapter_title}】{summary_text}",
-            source="chapter",
-            importance=importance,
-            meta={"type": "chapter_content", "chapter": chapter_idx, "title": chapter_title},
-        ))
-
-        return candidates
-
-    async def consolidate(self, chapter_content: str, chapter_title: str, chapter_idx: int, context: dict = None) -> dict:
-        context = context or {}
-        wm_candidates = self.extract_from_working_memory(chapter_content, chapter_idx)
-        ch_candidates = self.extract_from_chapter(chapter_content, chapter_title, chapter_idx, context)
-
-        all_candidates = wm_candidates + ch_candidates
-        promoted_to_ltm = 0
-        skipped = 0
-
-        importance_threshold = getattr(settings, 'CONSOLIDATION_IMPORTANCE_THRESHOLD', 0.4)
-
-        for candidate in all_candidates:
-            if candidate.importance < importance_threshold:
-                skipped += 1
-                continue
-
-            if self._is_duplicate(candidate):
-                skipped += 1
-                continue
-
-            embedding = None
-            if self.embed_fn:
-                try:
-                    embedding = await self.embed_fn(candidate.text)
-                except Exception as e:
-                    logger.warning(f"Failed to embed consolidation candidate: {e}")
-
-            if embedding is not None:
-                self.ltm.add(
-                    text=candidate.text,
-                    embedding=embedding,
-                    meta={
-                        **candidate.meta,
-                        "importance": candidate.importance,
-                        "source": candidate.source,
-                    },
+            # 2. 从章节内容中提取关系
+            relations = await self._extract_relations(
+                chapter_content, chapter_summary, chapter_index
+            )
+            for rel in relations:
+                self.graph.add_relation(
+                    source=rel["source"],
+                    target=rel["target"],
+                    relation_type=RelationType(rel["type"]),
+                    description=rel.get("description", ""),
+                    strength=rel.get("strength", 5),
+                    chapter=chapter_index,
                 )
-                promoted_to_ltm += 1
-            else:
-                self._pending.append(candidate)
+            result.relations_updated = len(relations)
 
-        result = {
-            "total_candidates": len(all_candidates),
-            "promoted_to_ltm": promoted_to_ltm,
-            "skipped": skipped,
-            "pending": len(self._pending),
-        }
-        logger.info(f"Memory consolidation for chapter {chapter_idx}: {result}")
+            # 3. 提取关键事实
+            facts = await self._extract_facts(chapter_content, chapter_summary)
+            result.facts_extracted = len(facts)
+
+            # 4. 写入结构化记忆
+            if self.structured is not None and facts:
+                for fact in facts:
+                    try:
+                        # 这里假设 structured 有相应方法
+                        if hasattr(self.structured, "add_fact"):
+                            self.structured.add_fact(chapter_index, fact)
+                    except Exception as e:
+                        result.errors.append(f"add_fact: {e}")
+
+            # 5. 清空工作记忆
+            self.working.clear()
+
+        except Exception as e:
+            logger.error(f"Consolidation failed: {e}")
+            result.errors.append(str(e))
+
         return result
 
-    def _is_duplicate(self, candidate: ConsolidationCandidate) -> bool:
-        existing_texts = self.ltm.get_all_texts()
-        candidate_prefix = candidate.text[:80]
-        for existing in existing_texts[-50:]:
-            if candidate_prefix in existing or existing[:80] in candidate.text:
-                return True
-        return False
+    async def _extract_relations(
+        self,
+        content: str,
+        summary: str,
+        chapter_index: int,
+    ) -> list[dict]:
+        """使用 LLM 提取章节中的角色关系。"""
+        # 这里使用简单的正则方法 + LLM 调用
+        from core.llm_router import call_llm, TaskType
+        prompt = (
+            f"从以下小说章节中提取所有角色之间的关系。\n\n"
+            f"## 章节内容（前 2000 字）\n{content[:2000]}\n\n"
+            f"## 摘要\n{summary}\n\n"
+            f"输出 JSON 数组，每个元素：\n"
+            f'{{"source": "角色A", "target": "角色B", "type": "关系类型", '
+            f'"description": "关系描述", "strength": 1-10}}\n\n'
+            f"关系类型可选：family, romantic, friend, enemy, mentor, rival, ally, subordinate, neutral\n\n"
+            f"如果没有明确关系，输出 []。"
+        )
+        try:
+            response = await call_llm(
+                TaskType.PLAN, prompt, temperature=0.2, json_mode=True
+            )
+            if isinstance(response, list):
+                return response
+            if isinstance(response, dict):
+                return response.get("relations", [])
+        except Exception as e:
+            logger.warning(f"Relation extraction failed: {e}")
+        return []
 
-    async def flush_pending(self):
-        if not self._pending or not self.embed_fn:
-            return 0
-        flushed = 0
-        remaining = []
-        for candidate in self._pending:
-            try:
-                embedding = await self.embed_fn(candidate.text)
-                if embedding is not None:
-                    self.ltm.add(
-                        text=candidate.text,
-                        embedding=embedding,
-                        meta={**candidate.meta, "importance": candidate.importance, "source": candidate.source},
-                    )
-                    flushed += 1
-                else:
-                    remaining.append(candidate)
-            except Exception:
-                remaining.append(candidate)
-        self._pending = remaining
-        return flushed
+    async def _extract_facts(self, content: str, summary: str) -> list[str]:
+        """从章节中提取关键事实。"""
+        from core.llm_router import call_llm, TaskType
+        prompt = (
+            f"从以下小说章节中提取关键事实（人物状态变化、新设定、关键事件等）。\n\n"
+            f"## 章节摘要\n{summary}\n\n"
+            f"输出 JSON 数组，每个元素是一句话事实：\n"
+            f'["主角林远获得了青云剑法", "青云宗宗主更换为张三", ...]'
+        )
+        try:
+            response = await call_llm(
+                TaskType.PLAN, prompt, temperature=0.2, json_mode=True
+            )
+            if isinstance(response, list):
+                return response
+        except Exception as e:
+            logger.warning(f"Fact extraction failed: {e}")
+        return []
