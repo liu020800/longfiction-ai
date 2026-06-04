@@ -124,3 +124,9 @@ longfiction_launcher.ps1
 *.key
 *.crt
 secrets/
+
+# GitHub Actions (require workflow scope; place in docs/workflows-reference/)
+# Workflows are stored in docs/workflows-reference/ as reference only.
+# To enable CI/CD, copy them to .github/workflows/ manually (requires
+# PAT with 'workflow' scope or repository admin).
+.github/workflows/
