@@ -487,13 +487,44 @@ cd longfiction-ai
 python -m venv venv
 source venv/bin/activate
 
-# 安装依赖（含开发工具）
+# 安装依赖
 pip install -r requirements.txt
 pip install pytest black flake8 mypy
 
 # 启动开发服务器
 python main.py
 ```
+
+### 启用 CI/CD
+
+CI/CD workflow 文件位于 `docs/workflows-reference/`（不是 `.github/workflows/`，
+因为推送到 `.github/workflows/` 需要 GitHub PAT 的 `workflow` 权限）。
+
+要启用：
+
+```bash
+# 方式 1：复制到标准位置（需要 workflow 权限的 PAT）
+cp docs/workflows-reference/*.yml .github/workflows/
+git add .github/workflows/
+git commit -m "ci: enable GitHub Actions"
+git push
+
+# 方式 2：通过 GitHub Web UI 上传
+# 在 GitHub 仓库页面 → Actions → set up a workflow yourself
+# 复制 docs/workflows-reference/ 中的内容
+
+# 方式 3：直接使用 GitHub CLI（需要 gh auth login 并有 workflow 权限）
+gh workflow enable ci.yml
+```
+
+包含的 workflow：
+
+- `ci.yml` - 基础 CI 检查
+- `tests.yml` - pytest 测试运行
+- `lint.yml` - black/flake8/mypy/isort 代码质量
+- `docker.yml` - Docker 镜像构建
+- `docs.yml` - GitHub Pages 文档部署
+- `codeql.yml` - 安全分析
 
 ### 代码规范
 
