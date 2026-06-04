@@ -1,0 +1,15 @@
+[Unit]
+Description=LongFiction-AI Novel Generation Service
+After=network.target
+
+[Service]
+Type=simple
+User=longfiction
+WorkingDirectory=/opt/longfiction-ai
+ExecStart=/opt/longfiction-ai/venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/opt/longfiction-ai
+
+[Install]
+WantedBy=multi-user.target

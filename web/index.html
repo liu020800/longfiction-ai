@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>LongFiction-AI 创作工坊</title>
+  <script>(function(){var t=localStorage.getItem('lf-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles/tokens.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/theme-dark.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/theme-light.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/base.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/components.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/layout.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/dashboard.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/workspace.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/settings.css?v=atelier-20260517-1" />
+  <link rel="stylesheet" href="/static/styles/responsive.css?v=atelier-20260517-1" />
+  <style>
+    .theme-transition, .theme-transition *, .theme-transition *::before, .theme-transition *::after {
+      transition: background 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">✦</span>
+        <span class="brand-text">长篇创作工坊</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#dashboard" class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">⊞</span><span class="nav-label">仪表盘</span>
+        </a>
+        <a href="#workspace" class="nav-item" data-page="workspace">
+          <span class="nav-icon">✎</span><span class="nav-label">创作工作台</span>
+        </a>
+        <a href="#settings" class="nav-item" data-page="settings">
+          <span class="nav-icon">⚙</span><span class="nav-label">账户设置</span>
+        </a>
+        <a href="#admin" class="nav-item" data-page="admin" id="nav-admin" style="display:none;">
+          <span class="nav-icon">◉</span><span class="nav-label">管理后台</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="sidebar-user" class="sidebar-user">
+          <div class="user-avatar">●</div>
+          <div class="user-info">
+            <span id="sidebar-username">未登录</span>
+            <span id="sidebar-balance" class="user-balance">¥0.0</span>
+          </div>
+        </div>
+        <a href="#login" class="nav-item" id="sidebar-login-btn">
+          <span class="nav-icon">↪</span><span class="nav-label">登录</span>
+        </a>
+        <a class="nav-item" id="theme-toggle-btn" style="cursor:pointer;">
+          <span class="nav-icon">☀</span><span class="nav-label">亮色模式</span>
+        </a>
+      </div>
+      <div class="sidebar-toggle" id="sidebar-toggle" title="折叠侧边栏">◁</div>
+    </aside>
+
+    <main id="main-content" class="main-content">
+      <div class="version-badge"><span class="pill pill-brand">创作工坊</span></div>
+
+      <!-- === Dashboard === -->
+      <section id="page-dashboard" class="page active">
+        <div class="dashboard-hero">
+          <div class="dashboard-hero-main">
+            <p class="eyebrow">创作中枢</p>
+            <h2>把长篇创作放进一张真正可工作的桌面里</h2>
+            <p class="page-subtitle">管理项目、整理设定、生成章节、追踪伏笔与时间线，让你的小说在同一套界面里持续推进。</p>
+            <div class="dashboard-hero-actions">
+              <button id="dashboard-new-project" class="btn-primary">开始一个新项目</button>
+              <a href="#workspace" class="btn-secondary">
+                <span class="btn-symbol" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M5 5.5A2.5 2.5 0 0 1 7.5 3h7A2.5 2.5 0 0 1 17 5.5v13.75a.75.75 0 0 1-1.12.65L11 17.1l-4.88 2.8A.75.75 0 0 1 5 19.25V5.5Z"/>
+                    <path d="M9 7.5h4M9 10.5h3"/>
+                  </svg>
+                </span>
+                进入创作台
+              </a>
+            </div>
+          </div>
+          <div class="dashboard-hero-side">
+            <div class="hero-note-card">
+              <div class="hero-note-label">本周写作提示</div>
+              <div class="hero-note-title">先确认设定，再批量推进章节</div>
+              <div class="hero-note-text">这个工作台最适合“设定先收束，再分章推进”的创作节奏。确认后生成，定稿后再让记忆系统接管后续一致性。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">⊞</div>
+            <div class="stat-body"><div class="stat-value" id="stat-projects">0</div><div class="stat-label">项目数</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">◫</div>
+            <div class="stat-body"><div class="stat-value" id="stat-chapters">0</div><div class="stat-label">规划章节</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">✦</div>
+            <div class="stat-body"><div class="stat-value" id="stat-finalized">0</div><div class="stat-label">已生成章节</div></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">¶</div>
+            <div class="stat-body"><div class="stat-value" id="stat-words">0</div><div class="stat-label">累计字数</div></div>
+          </div>
+        </div>
+
+        <div class="dashboard-library">
+          <div class="library-header">
+            <div>
+              <p class="eyebrow">项目书架</p>
+              <h3>项目书架</h3>
+            </div>
+            <div class="dashboard-search">
+              <input id="dashboard-search" type="text" placeholder="搜索标题、梗概或项目关键词..." />
+              <select id="dashboard-filter">
+                <option value="all">全部</option>
+                <option value="approved">已确认</option>
+                <option value="pending">待确认</option>
+              </select>
+            </div>
+          </div>
+          <div id="project-grid" class="project-grid">
+            <div class="empty-state">加载中...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- === Workspace === -->
+      <section id="page-workspace" class="page">
+        <div class="page-header">
+          <div class="header-left">
+            <button id="ws-back" class="btn-icon" title="返回仪表盘">←</button>
+            <div>
+              <p class="eyebrow">写作工作台</p>
+              <h2 id="ws-project-title">创作工作台</h2>
+            </div>
+            <span id="ws-project-id" class="pill">未选择</span>
+          </div>
+          <div class="header-right">
+            <button id="ws-delete-project" class="btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,0.3);" title="删除项目">删除</button>
+            <span id="ws-status" class="pill">待确认</span>
+          </div>
+        </div>
+        <div class="task-monitor-bar ws-panel">
+          <div class="task-monitor-head">
+            <div>
+              <p class="eyebrow">运行状态</p>
+              <h3>状态监控栏</h3>
+            </div>
+            <div class="task-monitor-actions">
+              <span id="task-monitor-meta" class="pill">未启动</span>
+              <button id="task-monitor-refresh" class="btn-xs btn-outline">刷新</button>
+            </div>
+          </div>
+          <div id="task-monitor-list" class="task-monitor-list">
+            <div class="empty-state">世界观、角色、章节规划、正文生成和批量推进的运行状态会显示在这里。</div>
+          </div>
+        </div>
+        <div class="workspace-atlas">
+          <aside class="studio-rail">
+            <div class="ws-panel studio-project-card">
+              <div class="ws-panel-header">
+                <div>
+                  <p class="eyebrow">项目参数</p>
+                  <h3>项目骨架</h3>
+                </div>
+                <button id="save-meta-btn" class="btn-sm">保存参数</button>
+              </div>
+              <div class="meta-grid">
+                <input id="meta-title" type="text" placeholder="小说标题（简短）" />
+                <input id="meta-outline" type="text" placeholder="项目摘要 / 核心冲突（由灵感生成后可调整）" />
+                <select id="meta-genre">
+                  <option value="urban_fantasy">都市玄幻</option>
+                  <option value="xuanhuan">玄幻</option>
+                  <option value="xianxia">仙侠</option>
+                  <option value="sci_fi">科幻</option>
+                  <option value="romance">言情</option>
+                </select>
+                <select id="meta-style">
+                  <option value="web_novel">爽文</option>
+                  <option value="dark">暗黑</option>
+                  <option value="humor">轻松</option>
+                  <option value="serious">严肃</option>
+                </select>
+                <label class="field-label">总目标章节数
+                  <input id="meta-target-chapters" type="number" value="10" min="1" max="300" />
+                </label>
+                <label class="field-label">单章基准字数
+                  <input id="meta-words-per-chapter" type="number" value="2000" min="200" max="10000" />
+                </label>
+              </div>
+            </div>
+
+            <div class="ws-panel studio-setting-panel">
+              <div class="ws-panel-header">
+                <div>
+                  <p class="eyebrow">设定生成</p>
+                  <h3>设定工作区</h3>
+                </div>
+                <div class="ws-tabs">
+                  <button class="ws-tab active" data-tab="world">世界观</button>
+                  <button class="ws-tab" data-tab="characters">角色</button>
+                  <button class="ws-tab" data-tab="chapters">章节规划</button>
+                </div>
+              </div>
+              <div class="regen-bar">
+                <input id="regen-hint" type="text" placeholder="告诉 AI 你想强化哪种方向，例如：悬疑感、权力斗争、慢热关系线" />
+                <button id="regen-world" class="btn-sm">世界观</button>
+                <button id="regen-characters" class="btn-sm">角色</button>
+                <button id="regen-chapters" class="btn-sm">章节</button>
+              </div>
+              <div id="ws-editors" class="ws-editors">
+                <textarea id="world-editor" class="ws-textarea active-editor" rows="12"></textarea>
+                <textarea id="characters-editor" class="ws-textarea" rows="12"></textarea>
+                <p class="action-hint" style="margin-bottom:8px;">这里只生成近期阶段规划，不一次性生成全书章节；后续会根据定稿记忆自动补下一阶段。</p>
+                <textarea id="chapters-editor" class="ws-textarea" rows="12"></textarea>
+              </div>
+              <div class="ws-actions">
+                <button id="approve-btn" class="btn-primary">保存并确认设定</button>
+                <span id="approve-status" class="action-hint">等待初始化</span>
+              </div>
+            </div>
+
+            <div class="ws-panel import-panel">
+              <div class="ws-panel-header">
+                <div>
+                  <p class="eyebrow">导入旧稿</p>
+                  <h3>导入已有内容</h3>
+                </div>
+                <button id="import-txt-btn" class="btn-sm">导入</button>
+              </div>
+              <textarea id="import-txt-text" rows="5" placeholder="粘贴已有小说 TXT 内容。系统会按“第X章”尝试切分，后续可在当前项目里继续续写与重构。"></textarea>
+            </div>
+          </aside>
+
+          <section class="manuscript-stage">
+            <div class="ws-panel manuscript-panel">
+              <div class="manuscript-topbar">
+                <div>
+                  <p class="eyebrow">正文写作</p>
+                  <h3>正文舞台</h3>
+                </div>
+                <span id="chapter-meta" class="pill">未选择</span>
+              </div>
+
+              <div class="action-toolbar" id="action-toolbar">
+                <input id="chapter-guidance" type="text" placeholder="本章创作指导，例如：加强对话火药味、推进主角失控边缘、埋一处隐性伏笔" style="flex:1;min-width:200px;" />
+                <label class="mini-input-group">目标字数
+                  <input id="chapter-target-words" type="number" value="2000" min="100" max="10000" step="100" />
+                </label>
+                <button id="continue-btn" class="btn-xs btn-outline">续写</button>
+                <button id="revise-btn" class="btn-xs btn-outline">整章改写</button>
+                <button id="revise-fragment-btn" class="btn-xs btn-outline">片段改写</button>
+                <label class="mini-input-group" title="关闭后可预览章节，手动确认后再定稿"><input id="auto-finalize" type="checkbox" checked /> 自动定稿</label>
+                <button id="finalize-btn" class="btn-xs btn-outline">定稿</button>
+                <button id="unfinalize-btn" class="btn-xs btn-outline">取消定稿</button>
+              </div>
+
+              <div class="fragment-bar">
+                <input id="fragment-guidance" type="text" placeholder="如果要局部重写，把目标片段粘贴到这里" />
+              </div>
+
+              <div class="reader-toolbar">
+                <div class="reader-toolbar-group">
+                  <button class="btn-xs btn-ghost" id="reader-font-down" title="缩小字号">A-</button>
+                  <button class="btn-xs btn-ghost" id="reader-font-up" title="放大字号">A+</button>
+                  <button class="btn-xs btn-ghost" id="reader-fullscreen" title="全屏阅读">沉浸阅读</button>
+                </div>
+                <span id="word-counter" style="margin-left:auto;font-size:var(--text-xs);color:var(--muted);">0 字</span>
+              </div>
+
+              <pre id="chapter-content" class="reader">生成章节后显示</pre>
+              <div id="finalize-errors" class="finalize-errors" style="display:none;margin-top:12px;padding:12px;border-radius:8px;background:var(--danger-bg,rgba(239,68,68,0.08));border:1px solid var(--danger-border,rgba(239,68,68,0.2));font-size:var(--text-sm);color:var(--danger,#ef4444);"></div>
+
+              <div class="manuscript-footer-tools">
+                <div class="tool-group">
+                  <span class="tool-label">导出</span>
+                  <button class="btn-xs btn-outline" onclick="downloadTxt()">TXT</button>
+                  <button class="btn-xs btn-outline" onclick="downloadZip()">ZIP</button>
+                  <button class="btn-xs btn-outline" onclick="downloadEpub()">EPUB</button>
+                </div>
+                <div class="tool-group">
+                  <span class="tool-label">分析</span>
+                  <button class="btn-xs btn-outline" onclick="detectAIShowReport()">AI检测</button>
+                  <button class="btn-xs btn-outline" onclick="detectAIWithHighlight()">AI高亮</button>
+                  <button class="btn-xs btn-outline" onclick="rewriteStyle()">去AI改写</button>
+                  <button class="btn-xs btn-outline" onclick="analyzeDialogue()">对话分析</button>
+                  <button class="btn-xs btn-outline" onclick="loadStyleLibrary()">风格库</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="story-cockpit">
+            <div class="ws-panel">
+              <div class="ws-panel-header">
+                <div>
+                  <p class="eyebrow">章节目录</p>
+                  <h3>章节航线</h3>
+                </div>
+                <span id="ws-task-id" class="pill">未初始化</span>
+              </div>
+              <div class="catalog-progress">
+                <div class="catalog-progress-bar"><div class="catalog-progress-fill" id="catalog-progress-fill" style="width:0%;"></div></div>
+                <span class="catalog-progress-text" id="catalog-progress-text">0%</span>
+              </div>
+              <div id="catalog" class="catalog cockpit-catalog"><div class="empty-state">创建项目后显示章节目录</div></div>
+            </div>
+
+            <div class="ws-panel">
+              <div class="ws-panel-header">
+                <div>
+                  <p class="eyebrow">版本历史</p>
+                  <h3>版本栈</h3>
+                </div>
+                <span id="versions-meta" class="pill">未选择</span>
+              </div>
+              <div class="preview-actions">
+                <button id="compare-versions-btn" class="btn-sm btn-outline">对比选中版本</button>
+              </div>
+              <div id="versions-list" class="catalog cockpit-versions"><div class="empty-state">选择章节后显示版本列表</div></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="bottom-panels story-grid">
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">正式事件</p><h3>正式时间线</h3></div><span id="timeline-meta" class="pill">0 条</span></div>
+            <div id="timeline-list" class="compact-list"><div class="empty-state">定稿后逐步形成</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">线索管理</p><h3>伏笔面板</h3></div><span id="foreshadow-meta" class="pill">0 条</span></div>
+            <div class="inline-form">
+              <input id="foreshadow-desc" type="text" placeholder="伏笔描述" />
+              <input id="foreshadow-chapter" type="number" placeholder="章节" style="width:72px;" />
+              <button id="plant-foreshadow-btn" class="btn-sm">埋设</button>
+            </div>
+            <div id="foreshadow-list" class="compact-list"><div class="empty-state">无伏笔</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">进度概览</p><h3>叙事进度</h3></div><span id="enh-progress-meta" class="pill">--</span></div>
+            <div id="enh-progress-content" class="compact-list"><div class="empty-state">生成后显示</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">质量流程</p><h3>创作质控链</h3></div><span id="quality-flow-meta" class="pill">待检查</span></div>
+            <div id="quality-flow-content" class="compact-list"><div class="empty-state">这里会显示设定、规划、生成、去AI、一致性、定稿与重规划的执行状态。</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">悬念管理</p><h3>悬念弧</h3></div><span id="enh-arcs-meta" class="pill">0 条</span></div>
+            <div id="enh-arcs-content" class="compact-list"><div class="empty-state">生成后显示</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">读者视角</p><h3>信息差</h3></div><span id="enh-infogap-meta" class="pill">--</span></div>
+            <div id="enh-infogap-content" class="compact-list"><div class="empty-state">生成后显示</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header">
+              <div><p class="eyebrow">设定同步</p><h3>故事演进</h3></div>
+              <span id="story-evolution-meta" class="pill">待检查</span>
+            </div>
+            <div class="preview-actions">
+              <button id="apply-story-evolution-btn" class="btn-sm btn-outline">审阅并同步</button>
+            </div>
+            <div id="story-evolution-content" class="compact-list"><div class="empty-state">定稿后显示演进建议</div></div>
+          </div>
+          <div class="ws-panel quality-heatmap-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">质量总览</p><h3>章节热力图</h3></div><span id="quality-heatmap-meta" class="pill">加载中</span></div>
+            <div id="quality-heatmap-content" class="compact-list"><div class="empty-state">生成后显示</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">角色网络</p><h3>关系图谱</h3></div><span id="rel-graph-meta" class="pill">0 关系</span></div>
+            <div id="rel-graph-content" class="compact-list"><div class="empty-state">生成章节后自动构建角色关系网络</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header">
+              <div><p class="eyebrow">风格分析</p><h3>风格指纹</h3></div>
+              <span id="style-fp-meta" class="pill">未学习</span>
+            </div>
+            <div class="preview-actions">
+              <button id="style-learn-btn" class="btn-sm btn-outline">学习风格样本</button>
+            </div>
+            <div id="style-fp-content" class="compact-list"><div class="empty-state">点击"学习风格样本"上传参考文本，系统将提取风格指纹</div></div>
+            <dialog id="style-learn-dialog" class="dialog">
+              <div class="dialog-body" style="max-width:520px;">
+                <h3>风格学习</h3>
+                <p style="color:var(--text-2);font-size:var(--text-sm);">粘贴参考文本（至少500字中文），系统将提取句式、修辞、情感等风格指纹。</p>
+                <textarea id="style-learn-input" rows="8" style="width:100%;resize:vertical;margin:8px 0;" placeholder="在此粘贴参考文本..."></textarea>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="btn-sm btn-outline" onclick="$('style-learn-dialog').close()">取消</button>
+                  <button id="style-learn-submit" class="btn-sm">开始学习</button>
+                </div>
+              </div>
+            </dialog>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">模型统计</p><h3>模型路由</h3></div><span id="model-router-meta" class="pill">--</span></div>
+            <div id="model-router-content" class="compact-list"><div class="empty-state">生成后显示模型调用统计</div></div>
+          </div>
+          <div class="ws-panel">
+            <div class="ws-panel-header"><div><p class="eyebrow">批量生成</p><h3>批量推进</h3></div><span id="batch-meta" class="pill">就绪</span></div>
+            <div class="inline-form">
+              <label class="field-label compact">起始章
+                <input id="batch-start" type="number" min="1" placeholder="1" style="width:72px;" value="1" title="从第几章开始，直接填写用户看到的章节号，例如 1 表示第 1 章" />
+              </label>
+              <label class="field-label compact">结束章
+                <input id="batch-end" type="number" min="0" placeholder="0" style="width:72px;" value="0" title="生成到第几章，填写 0 表示直到当前已规划末尾；填更大的章号会先补近期规划，再连续推进到该章" />
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:4px;color:var(--text-2);font-size:var(--text-xs);">自动定稿
+                <input id="batch-auto-finalize" type="checkbox" checked />
+              </label>
+              <button id="batch-generate-btn" class="btn-sm">执行</button>
+            </div>
+            <div id="batch-progress" class="compact-list"><div class="empty-state">未启动</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- === Settings === -->
+      <section id="page-settings" class="page">
+        <div class="page-header"><h2>账户设置</h2><p class="page-subtitle">管理你的账户信息与系统配置</p></div>
+        <div class="settings-grid">
+          <div class="ws-panel">
+            <h3>个人信息</h3>
+            <div class="form-row"><label>用户名</label><input id="set-username" type="text" readonly /></div>
+            <div class="form-row"><label>昵称</label><input id="set-nickname" type="text" /></div>
+            <div class="form-row"><label>邮箱</label><input id="set-email" type="email" /></div>
+            <button id="save-profile-btn" class="btn-primary">保存</button>
+            <span id="profile-status" class="action-hint"></span>
+          </div>
+          <div class="ws-panel">
+            <h3>账户信息</h3>
+            <div class="form-row"><label>角色</label><input id="set-role" type="text" readonly /></div>
+            <div class="form-row"><label>余额</label><input id="set-balance" type="text" readonly /></div>
+            <div class="form-row"><label>充值总额</label><input id="set-recharged" type="text" readonly /></div>
+            <div class="form-row"><label>消费总额</label><input id="set-consumed" type="text" readonly /></div>
+          </div>
+        </div>
+
+        <!-- 模型配置面板 -->
+        <div class="llm-config-section">
+          <div class="ws-panel">
+            <h3>模型配置 <span id="llm-config-badge" class="llm-badge"></span></h3>
+            <div id="llm-warnings" class="llm-warnings"></div>
+            <div class="llm-config-grid">
+              <div class="form-row"><label>API Base</label><input id="llm-api-base" type="text" placeholder="https://api.openai.com/v1" /></div>
+              <div class="form-row"><label>API Key</label><input id="llm-api-key" type="password" placeholder="留空则不修改" /><span id="llm-key-hint" class="llm-key-hint"></span></div>
+            </div>
+            <h4 class="llm-subtitle">各角色模型</h4>
+            <div class="llm-models-grid">
+              <div class="form-row"><label>默认</label><input id="llm-model-default" type="text" /></div>
+              <div class="form-row"><label>规划</label><input id="llm-model-planner" type="text" /></div>
+              <div class="form-row"><label>写作</label><input id="llm-model-writer" type="text" /></div>
+              <div class="form-row"><label>风格</label><input id="llm-model-style" type="text" /></div>
+              <div class="form-row"><label>检查</label><input id="llm-model-check" type="text" /></div>
+              <div class="form-row"><label>嵌入</label><input id="llm-model-embedding" type="text" /></div>
+            </div>
+            <div class="llm-config-grid" style="margin-top:8px;">
+              <div class="form-row"><label>JSON模式</label><input id="llm-use-response-format" type="checkbox" /></div>
+              <div class="form-row"><label>超时(秒)</label><input id="llm-timeout" type="number" min="10" max="600" /></div>
+            </div>
+            <div class="llm-config-actions">
+              <button id="llm-save-btn" class="btn-primary">保存模型配置</button>
+              <button id="llm-reset-btn" class="btn-sm">重置为当前值</button>
+              <span id="llm-save-status" class="action-hint"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- === Admin === -->
+      <section id="page-admin" class="page">
+        <div class="page-header"><h2>管理后台</h2><p class="page-subtitle">用户管理与系统运维</p></div>
+        <div class="section-actions">
+          <button id="admin-refresh-users" class="btn-sm">刷新用户列表</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="admin-users-table" class="data-table">
+            <thead><tr><th>ID</th><th>用户名</th><th>昵称</th><th>邮箱</th><th>角色</th><th>余额</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="admin-users-body"><tr><td colspan="8" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="ws-panel" style="margin-top:16px;">
+          <h3>充值操作</h3>
+          <div class="inline-form">
+            <input id="admin-recharge-uid" type="number" placeholder="用户ID" style="width:80px;" />
+            <input id="admin-recharge-amount" type="number" placeholder="金额" style="width:80px;" step="0.01" />
+            <button id="admin-recharge-btn" class="btn-sm">充值</button>
+            <span id="admin-status" class="action-hint"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Mobile bottom tab bar -->
+  <div class="bottom-tab-bar">
+    <a href="#dashboard" class="bottom-tab-item active" data-page="dashboard"><span class="nav-icon">⊞</span>仪表盘</a>
+    <a href="#workspace" class="bottom-tab-item" data-page="workspace"><span class="nav-icon">✎</span>工作台</a>
+    <a href="#settings" class="bottom-tab-item" data-page="settings"><span class="nav-icon">⚙</span>设置</a>
+  </div>
+
+  <div id="dialog-overlay" class="dialog-overlay" style="display:none;">
+    <div id="dialog-box" class="dialog-box" tabindex="-1">
+      <div id="dialog-content"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div style="position:fixed;left:18px;bottom:14px;color:var(--muted);font-size:var(--text-xs);z-index:10;">LongFiction-AI · 长篇创作工坊</div>
+
+  <!-- Component Scripts -->
+  <script src="/static/components/icons.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/theme.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/dialog.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/toast.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/button.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/empty-state.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/word-counter.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/sidebar.js?v=atelier-20260517-1"></script>
+  <script src="/static/components/keyboard.js?v=atelier-20260517-1"></script>
+  <!-- App Modules -->
+  <script src="/static/modules/state.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/helpers.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/api-client.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/auth.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/navigation.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/dashboard.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/workspace.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/settings.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/export-ai.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/enhancement-panel.js?v=atelier-20260517-1"></script>
+  <!-- P3 New Modules -->
+  <script src="/static/modules/quality-heatmap.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/ai-detector.js?v=atelier-20260517-1"></script>
+  <script src="/static/modules/app-init.js?v=atelier-20260517-1"></script>
+</body>
+</html>

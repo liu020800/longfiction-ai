@@ -1,0 +1,29 @@
+/* === Settings Page Styles === */
+
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.form-row label { min-width: 80px; font-size: var(--text-md); color: var(--text-2); }
+.form-row input { flex: 1; }
+
+/* === LLM Config Section === */
+.llm-config-section { margin-top: 16px; }
+.llm-config-section .ws-panel { max-width: 100%; }
+.llm-subtitle { font-size: var(--text-md); color: var(--text-2); margin: 12px 0 4px; font-weight: var(--weight-medium); }
+.llm-models-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.llm-config-grid { }
+.llm-config-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.llm-key-hint { font-size: var(--text-xs); color: var(--muted); white-space: nowrap; margin-left: 4px; }
+.llm-badge { font-size: var(--text-xs); padding: 2px 8px; border-radius: 10px; margin-left: 8px; font-weight: var(--weight-medium); }
+.llm-badge.badge-ok { background: var(--success-bg, #1a3a2a); color: var(--success-fg, #4caf50); }
+.llm-badge.badge-warn { background: var(--warning-bg, #3a2a1a); color: var(--warning-fg, #ff9800); }
+.llm-warnings { margin-bottom: 8px; }
+.llm-warn-item { font-size: var(--text-sm); color: var(--warning-fg, #ff9800); padding: 4px 0; }
+.form-row input[type="checkbox"] { flex: unset; width: 18px; height: 18px; }
+
+/* === Data Table === */
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.data-table th, .data-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.data-table th { color: var(--muted); font-weight: var(--weight-medium); font-size: var(--text-sm); }
+.data-table td { color: var(--text-2); }
+.data-table tr:hover td { background: var(--table-hover-bg); }
+.data-table tr { transition: background var(--transition-fast); }

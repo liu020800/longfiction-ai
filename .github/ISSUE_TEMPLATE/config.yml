@@ -1,0 +1,35 @@
+# Bug Reports
+Use this template: https://github.com/liu020800/longfiction-ai/issues/new?template=bug_report.md
+
+# Feature Requests
+Use this template: https://github.com/liu020800/longfiction-ai/issues/new?template=feature_request.md
+
+# Questions
+Use this template: https://github.com/liu020800/longfiction-ai/issues/new?template=question.md
+
+# Documentation
+Use this template: https://github.com/liu020800/longfiction-ai/issues/new?template=documentation.md
+
+## When reporting issues, please include:
+
+1. **Clear title** - Summarize the issue in the title
+2. **Reproduction steps** - Detailed steps to reproduce
+3. **Expected vs actual** - What you expected vs what happened
+4. **Environment** - OS, Python version, LLM provider/model
+5. **Logs/Screenshots** - Any relevant error logs or screenshots
+
+## Priority Labels
+
+- `P0` - Critical, must fix immediately
+- `P1` - High priority
+- `P2` - Medium priority
+- `P3` - Low priority, nice to have
+
+## Type Labels
+
+- `bug` - Something isn't working
+- `enhancement` - New feature request
+- `documentation` - Documentation improvement
+- `question` - General questions
+- `help wanted` - Need community help
+- `good first issue` - Good for newcomers

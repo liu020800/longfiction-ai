@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  longfiction-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-https://api.openai.com/v1}
+      - LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      - LLM_PLANNER_MODEL=${LLM_PLANNER_MODEL:-gpt-4o-mini}
+      - LLM_WRITER_MODEL=${LLM_WRITER_MODEL:-gpt-4o-mini}
+      - LLM_STYLE_MODEL=${LLM_STYLE_MODEL:-gpt-4o-mini}
+      - LLM_CHECK_MODEL=${LLM_CHECK_MODEL:-gpt-4o-mini}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    restart: unless-stopped

@@ -1,0 +1,49 @@
+/* === Dark Theme (Default) === */
+
+:root,
+[data-theme="dark"] {
+  --bg: #1d1713;
+  --bg-2: #241d18;
+  --bg-3: #30261f;
+  --sidebar: rgba(30, 23, 19, 0.95);
+  --panel: rgba(42, 33, 27, 0.82);
+  --panel-hover: rgba(49, 39, 32, 0.90);
+  --panel-solid: #2a211b;
+  --input-bg: rgba(255, 248, 239, 0.045);
+
+  --text: #f5ede5;
+  --text-2: #dccdbf;
+  --text-3: #baa691;
+  --muted: #968271;
+
+  --line: rgba(255, 240, 225, 0.08);
+  --line-2: rgba(255, 240, 225, 0.14);
+  --line-hover: rgba(255, 240, 225, 0.20);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+
+  --overlay-bg: rgba(0, 0, 0, 0.60);
+  --overlay-blur: 4px;
+
+  --code-bg: rgba(0, 0, 0, 0.35);
+
+  --stat-icon-bg: rgba(199, 108, 57, 0.12);
+  --nav-active-bg: rgba(199, 108, 57, 0.14);
+  --nav-active-border: rgba(199, 108, 57, 0.20);
+  --nav-hover-bg: rgba(255, 248, 239, 0.045);
+  --btn-ghost-bg: rgba(255, 248, 239, 0.06);
+  --btn-ghost-hover: rgba(255, 248, 239, 0.10);
+  --pill-info-bg: rgba(47, 107, 95, 0.18);
+  --pill-info-border: rgba(83, 151, 136, 0.24);
+  --pill-info-text: #d8f0ea;
+  --catalog-done-border: rgba(83, 151, 136, 0.18);
+  --catalog-finalized-border: rgba(199, 108, 57, 0.22);
+  --table-hover-bg: rgba(255, 255, 255, 0.02);
+  --toast-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --dialog-shadow: var(--shadow-xl);
+  --card-hover-border: rgba(199, 108, 57, 0.30);
+  --focus-ring: rgba(199, 108, 57, 0.45);
+  --empty-icon-opacity: 0.3;
+}

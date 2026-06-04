@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Validate Python imports
+      run: |
+        python -c "import core.config; import core.models; print('Imports OK')"
+
+    - name: Check file sizes
+      run: |
+        # Warn if any Python file is over 5000 lines
+        find . -name "*.py" -not -path "./venv/*" -exec wc -l {} \; | awk '$1 > 5000 {print "WARNING: " $2 " has " $1 " lines"}'
+
+    - name: Check for secrets
+      run: |
+        # Fail if .env or similar files are committed
+        if git ls-files | grep -E '\.(env|env\.local|env\.production)$' | grep -v '.env.example'; then
+          echo "ERROR: .env files should not be committed"
+          exit 1
+        fi

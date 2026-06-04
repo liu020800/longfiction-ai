@@ -1,0 +1,38 @@
+{
+  "web_novel": {
+    "template_id": "web_novel",
+    "template_name": "爽文网文",
+    "sentence_length_dist": [0.3, 0.4, 0.2, 0.1],
+    "dialogue_density": 0.3,
+    "rhetoric_frequency": 0.08,
+    "emotion_tone": [0.5, 0.2, 0.3],
+    "rhythm_pattern": [1.2, 0.8, 1.5, 0.9, 1.3]
+  },
+  "dark": {
+    "template_id": "dark",
+    "template_name": "暗黑流",
+    "sentence_length_dist": [0.2, 0.3, 0.3, 0.2],
+    "dialogue_density": 0.2,
+    "rhetoric_frequency": 0.12,
+    "emotion_tone": [0.15, 0.6, 0.25],
+    "rhythm_pattern": [1.0, 1.5, 0.7, 1.8, 0.6]
+  },
+  "humor": {
+    "template_id": "humor",
+    "template_name": "轻松搞笑",
+    "sentence_length_dist": [0.4, 0.4, 0.15, 0.05],
+    "dialogue_density": 0.45,
+    "rhetoric_frequency": 0.15,
+    "emotion_tone": [0.7, 0.1, 0.2],
+    "rhythm_pattern": [0.8, 0.7, 1.0, 0.9, 0.8]
+  },
+  "serious": {
+    "template_id": "serious",
+    "template_name": "严肃正剧",
+    "sentence_length_dist": [0.15, 0.35, 0.35, 0.15],
+    "dialogue_density": 0.2,
+    "rhetoric_frequency": 0.1,
+    "emotion_tone": [0.3, 0.3, 0.4],
+    "rhythm_pattern": [1.0, 1.2, 1.1, 1.3, 1.0]
+  }
+}

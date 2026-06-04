@@ -1,0 +1,54 @@
+/* === Light Theme === */
+
+[data-theme="light"] {
+  --bg: #f6f0e6;
+  --bg-2: #fffdfa;
+  --bg-3: #efe4d3;
+  --sidebar: rgba(255, 251, 245, 0.92);
+  --panel: rgba(255, 252, 247, 0.88);
+  --panel-hover: rgba(255, 252, 247, 0.96);
+  --panel-solid: #fffdfa;
+  --input-bg: rgba(124, 90, 57, 0.035);
+
+  --text: #2c1e18;
+  --text-2: #5a4639;
+  --text-3: #7a6457;
+  --muted: #9a8576;
+
+  --line: rgba(78, 48, 28, 0.10);
+  --line-2: rgba(78, 48, 28, 0.15);
+  --line-hover: rgba(78, 48, 28, 0.22);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.20);
+
+  --overlay-bg: rgba(0, 0, 0, 0.40);
+  --overlay-blur: 6px;
+
+  --code-bg: rgba(0, 0, 0, 0.05);
+
+  --stat-icon-bg: rgba(182, 90, 42, 0.08);
+  --nav-active-bg: rgba(182, 90, 42, 0.08);
+  --nav-active-border: rgba(182, 90, 42, 0.16);
+  --nav-hover-bg: rgba(91, 66, 47, 0.05);
+  --btn-ghost-bg: rgba(91, 66, 47, 0.05);
+  --btn-ghost-hover: rgba(91, 66, 47, 0.09);
+  --pill-info-bg: rgba(47, 107, 95, 0.10);
+  --pill-info-border: rgba(47, 107, 95, 0.18);
+  --pill-info-text: #24584d;
+  --catalog-done-border: rgba(47, 107, 95, 0.24);
+  --catalog-finalized-border: rgba(182, 90, 42, 0.28);
+  --table-hover-bg: rgba(0, 0, 0, 0.02);
+  --toast-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --dialog-shadow: var(--shadow-lg);
+  --card-hover-border: rgba(182, 90, 42, 0.26);
+  --focus-ring: rgba(182, 90, 42, 0.38);
+  --empty-icon-opacity: 0.15;
+
+  --color-primary: #b65a2a;
+  --color-accent2: #2f6b5f;
+  --gradient-primary: linear-gradient(135deg, #c76c39, #2f6b5f);
+  --shadow-glow-primary: 0 0 20px rgba(182, 90, 42, 0.15);
+  --shadow-glow-accent2: 0 0 20px rgba(47, 107, 95, 0.14);
+}

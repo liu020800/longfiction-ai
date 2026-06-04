@@ -1,0 +1,20 @@
+{
+  "project_name": "LongFiction-AI",
+  "default_genre": "urban_fantasy",
+  "default_style": "web_novel",
+  "target_chapters": 100,
+  "words_per_chapter": 2000,
+  "scene_target_words": 800,
+  "multi_version_count": 2,
+  "memory_short_term_size": 3,
+  "style_perturbation_rate": 0.3,
+  "conflict_density": 0.3,
+  "recommended_models": {
+    "default": "gpt-4o-mini",
+    "planner": "gpt-4o-mini",
+    "writer": "gpt-4o-mini",
+    "style": "gpt-4o-mini",
+    "check": "gpt-4o-mini",
+    "embedding": "text-embedding-3-small"
+  }
+}
