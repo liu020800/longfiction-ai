@@ -310,3 +310,62 @@ def reset_router():
     """重置全局路由器（用于测试）。"""
     global _router
     _router = None
+
+
+# ============================================================
+# 向后兼容：旧 API 单例实例
+# ============================================================
+
+def _normalize_for_litellm(model_name: str) -> str:
+    """为 LiteLLM 规范化模型名（添加 openai/ 前缀如果需要）。"""
+    if not model_name:
+        return model_name
+    # 已经有 provider 前缀
+    if "/" in model_name:
+        return model_name
+    # 使用 OpenAI 兼容 API 时需要 openai/ 前缀
+    from core.config import settings
+    if settings.LLM_API_BASE and "api.openai.com" not in settings.LLM_API_BASE.lower():
+        return f"openai/{model_name}"
+    return model_name
+
+
+# 旧代码使用 model_router.select_model() 和 record_result()
+class _CompatModelRouter:
+    """旧 API 兼容层。"""
+
+    def __init__(self, router: ModelRouter):
+        self._router = router
+
+    def select_model(self, task_type) -> str:
+        """根据任务类型选择模型名（已规范化）。"""
+        from core.models import TaskType
+        if isinstance(task_type, str):
+            try:
+                task_type = TaskType(task_type)
+            except ValueError:
+                task_type = TaskType.WRITE
+        role = TASK_TO_ROLE.get(task_type, ModelRole.WRITER)
+        model = self._router.select_model(role)
+        return _normalize_for_litellm(model.name) if model else ""
+
+    def record_result(self, model: str, task_type, latency_ms: float, error: bool = False):
+        """记录调用结果。"""
+        from core.models import TaskType
+        if isinstance(task_type, str):
+            try:
+                task_type = TaskType(task_type)
+            except ValueError:
+                task_type = TaskType.WRITE
+        role = TASK_TO_ROLE.get(task_type, ModelRole.WRITER)
+        # 旧 API 不区分 model，只更新全局统计
+        # 这里简化处理：直接记录
+        state = self._router._get_state(model)
+        if error:
+            state.record_failure()
+        else:
+            state.record_success(latency_ms)
+
+
+# 全局兼容实例
+model_router = _CompatModelRouter(get_router())

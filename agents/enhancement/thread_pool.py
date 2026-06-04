@@ -101,3 +101,29 @@ def get_pool(max_concurrent: int = 4) -> AsyncTaskPool:
     if _default_pool is None:
         _default_pool = AsyncTaskPool(max_concurrent=max_concurrent)
     return _default_pool
+
+
+# ============================================================
+# 向后兼容：旧 API 类名
+# ============================================================
+
+class ThreadPool:
+    """兼容旧 API 的线程池。
+
+    提供简单的线程池接口。
+    """
+
+    def __init__(self, max_workers: int = 4):
+        self.max_workers = max_workers
+        self.async_pool = AsyncTaskPool(max_concurrent=max_workers)
+
+    async def map(self, func, items: list):
+        """异步 map。"""
+        return await self.async_pool.run_with_limit(func, items)
+
+    async def run(self, *tasks):
+        """运行多个任务。"""
+        return await self.async_pool.run_many(tasks)
+
+    def shutdown(self):
+        pass

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
 
 from memory.working_memory import WorkingMemory
 from memory.relationship_graph import RelationshipGraph, RelationType
@@ -25,6 +25,10 @@ class ConsolidationResult:
     events_recorded: int = 0
     working_memory_items: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+# 向后兼容：旧 API 的类名
+MemoryConsolidationResult = ConsolidationResult
 
 
 class MemoryConsolidator:
@@ -144,3 +148,77 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
         return []
+
+
+# ============================================================
+# 向后兼容：旧 API（MemoryConsolidation）
+# ============================================================
+
+class MemoryConsolidation:
+    """兼容旧 API 的记忆整合器。
+
+    原 API 接受 (working_memory, short_term, long_term, structured)
+    并提供 async consolidate(content, title, idx, context) 方法。
+    """
+
+    def __init__(
+        self,
+        working_memory: Any = None,
+        short_term: Any = None,
+        long_term: Any = None,
+        structured: Any = None,
+    ):
+        self.working_memory = working_memory
+        self.short_term = short_term
+        self.long_term = long_term
+        self.structured = structured
+        self.embed_fn = None  # 由外部注入
+
+    async def consolidate(
+        self,
+        chapter_content: str,
+        chapter_title: str,
+        chapter_idx: int,
+        context: Optional[dict] = None,
+    ) -> str:
+        """整合一章内容，返回摘要。"""
+        try:
+            # 简单的摘要：取章节前 500 字
+            if not chapter_content:
+                return ""
+            summary = chapter_content[:500]
+            if len(chapter_content) > 500:
+                summary += "..."
+
+            # 写入短期记忆
+            if self.short_term is not None and hasattr(self.short_term, "add_chapter"):
+                self.short_term.add_chapter(chapter_title, chapter_content, summary)
+
+            # 写入长期记忆（如果有 embed_fn）
+            if (
+                self.long_term is not None
+                and self.embed_fn is not None
+                and hasattr(self.long_term, "add")
+            ):
+                try:
+                    import asyncio
+                    embedding = await self.embed_fn(f"{chapter_title}\n{summary}")
+                    self.long_term.add(
+                        text=f"【{chapter_title}】{summary}",
+                        embedding=embedding,
+                        meta={"type": "chapter", "title": chapter_title, "chapter_idx": chapter_idx},
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to add to long_term: {e}")
+
+            # 写入结构化记忆
+            if self.structured is not None and hasattr(self.structured, "add_chapter_summary"):
+                self.structured.add_chapter_summary(chapter_idx, chapter_title, summary)
+
+            return summary
+        except Exception as e:
+            logger.error(f"Consolidation failed: {e}")
+            return chapter_content[:500] if chapter_content else ""
+
+    def __repr__(self) -> str:
+        return f"MemoryConsolidation(short_term={self.short_term is not None}, long_term={self.long_term is not None})"

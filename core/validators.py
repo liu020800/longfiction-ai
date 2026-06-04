@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+class OutputValidationError(Exception):
+    """LLM 输出验证失败异常。"""
+    pass
+
+
 @dataclass
 class ParseResult:
     """解析结果。"""

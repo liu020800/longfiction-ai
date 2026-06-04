@@ -337,3 +337,58 @@ def style_distance(a: StyleFeatures, b: StyleFeatures) -> float:
         max_val = max(abs(va), abs(vb), 1.0)
         distance_sq += ((va - vb) / max_val) ** 2
     return distance_sq ** 0.5
+
+
+# ============================================================
+# 向后兼容：旧 API 类名
+# ============================================================
+
+class StyleLearner:
+    """兼容旧 API 的风格学习器。
+
+    提供 learn_from_samples 方法。
+    """
+
+    def __init__(self):
+        self.profiles: dict[str, StyleProfile] = {}
+
+    def learn_from_samples(
+        self,
+        samples: list[str],
+        name: str = "learned",
+    ) -> StyleProfile:
+        """从样本文本学习风格。"""
+        profile = learn_style_from_samples(samples, name)
+        self.profiles[name] = profile
+        return profile
+
+    def get_profile(self, name: str) -> Optional[StyleProfile]:
+        return self.profiles.get(name)
+
+    def list_profiles(self) -> list[str]:
+        return list(self.profiles.keys())
+
+
+class StylePreserver:
+    """兼容旧 API 的风格保持器。
+
+    用于在生成过程中保持风格一致性。
+    """
+
+    def __init__(self, profile: Optional[StyleProfile] = None):
+        self.profile = profile
+
+    def set_profile(self, profile: StyleProfile):
+        self.profile = profile
+
+    def get_style_prompt(self) -> str:
+        if self.profile is None:
+            return ""
+        return style_features_to_prompt(self.profile)
+
+    def check_drift(self, text: str, threshold: float = 0.3) -> float:
+        """检查风格漂移。返回 0-1 的距离。"""
+        if self.profile is None or not text:
+            return 0.0
+        current = extract_style_features(text)
+        return style_distance(current, self.profile.features)
