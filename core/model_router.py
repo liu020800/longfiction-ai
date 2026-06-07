@@ -317,16 +317,36 @@ def reset_router():
 # ============================================================
 
 def _normalize_for_litellm(model_name: str) -> str:
-    """为 LiteLLM 规范化模型名（添加 openai/ 前缀如果需要）。"""
+    """为 LiteLLM 规范化模型名（按 `LLM_PROVIDER` 显式分支）。
+
+    原则：
+    1. 用户已写 `provider/model` 时不修改
+    2. `provider=openai` 时不强制加前缀
+    3. `provider=openai_compatible/newapi/oneapi/lmstudio` 加 `openai/`
+    4. `provider=deepseek/qwen/ollama` 加对应 provider 前缀
+    """
     if not model_name:
         return model_name
-    # 已经有 provider 前缀
     if "/" in model_name:
         return model_name
-    # 使用 OpenAI 兼容 API 时需要 openai/ 前缀
-    from core.config import settings
-    if settings.LLM_API_BASE and "api.openai.com" not in settings.LLM_API_BASE.lower():
+
+    provider = getattr(settings, "LLM_PROVIDER", "openai_compatible").lower()
+
+    if provider == "openai":
+        return model_name
+
+    if provider in {"openai_compatible", "newapi", "oneapi", "lmstudio"}:
         return f"openai/{model_name}"
+
+    if provider == "deepseek":
+        return model_name if model_name.startswith("deepseek/") else f"deepseek/{model_name}"
+
+    if provider == "qwen":
+        return model_name if model_name.startswith("dashscope/") else f"dashscope/{model_name}"
+
+    if provider == "ollama":
+        return model_name if model_name.startswith("ollama/") else f"ollama/{model_name}"
+
     return model_name
 
 

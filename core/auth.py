@@ -11,7 +11,7 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY = settings.LLM_API_KEY[:32] if settings.LLM_API_KEY else os.urandom(32).hex()
+SECRET_KEY = settings.get_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 CHAPTER_COST = 1.0

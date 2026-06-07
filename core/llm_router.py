@@ -140,49 +140,170 @@ async def call_llm(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     json_mode: bool = False,
-) -> str:
-    from core.model_router import model_router
+):
+    """调用 LLM。
+
+    行为：
+    - 通过 `ModelRouter.execute()` 走主备模型切换
+    - 单模型内部按 `LLM_MAX_RETRIES_PER_MODEL` 指数退避重试
+    - 致命错误（401/403/404/context_too_long）不重试
+    - JSON mode 不支持时自动降级到纯文本 + `parse_llm_json`
+    """
+    from core.model_router import get_router
+    from core.llm_errors import classify_llm_exception
+    from core.llm_json import parse_llm_json
+
     temperature = clamp_temperature(task_type, temperature)
-    model = model_router.select_model(task_type)
-    messages = []
+    messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    if not settings.LLM_API_KEY:
-        error_msg = "API key not configured. Set OPENAI_API_KEY in .env file"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
+    router = get_router()
+    role = _task_to_role(task_type)
 
-    kwargs = {
-        "model": model,
+    call_kwargs = {
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "api_key": settings.LLM_API_KEY,
-        "api_base": settings.LLM_API_BASE,
+        "json_mode": json_mode,
     }
-    if json_mode and settings.LLM_USE_RESPONSE_FORMAT:
-        kwargs["response_format"] = {"type": "json_object"}
 
-    start_time = time.time()
-    try:
+    if settings.LLM_ROUTE_FALLBACK_ENABLED:
+        return await router.execute(role, _single_llm_call, **call_kwargs)
+
+    model = router.select_model(role)
+    if not model:
+        raise RuntimeError(f"No model configured for role {role}")
+    return await _single_llm_call(model, **call_kwargs)
+
+
+def _should_use_response_format(json_mode: bool) -> bool:
+    """根据 `LLM_JSON_MODE_POLICY` 决定是否添加 `response_format`。
+
+    - off: 永远不开
+    - force: 强制开
+    - auto: 只在已知支持 JSON mode 的 provider 下开
+    """
+    if not json_mode:
+        return False
+    if not settings.LLM_USE_RESPONSE_FORMAT and getattr(settings, "LLM_JSON_MODE_POLICY", "auto") == "auto":
+        return False
+    policy = getattr(settings, "LLM_JSON_MODE_POLICY", "auto").lower()
+    if policy == "off":
+        return False
+    if policy == "force":
+        return True
+    provider = getattr(settings, "LLM_PROVIDER", "openai_compatible").lower()
+    return provider in {
+        "openai",
+        "openai_compatible",
+        "newapi",
+        "oneapi",
+        "deepseek",
+        "qwen",
+        "lmstudio",
+    }
+
+
+def _task_to_role(task_type: TaskType):
+    """任务类型 -> 模型角色映射（避免循环 import）。"""
+    from core.model_router import TASK_TO_ROLE, ModelRole
+    return TASK_TO_ROLE.get(task_type, ModelRole.WRITER)
+
+
+async def _single_llm_call(
+    model_config,
+    *,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    json_mode: bool,
+):
+    """单模型 LLM 调用 + 内部重试 + JSON mode 降级。
+
+    由 `ModelRouter.execute()` 包装，自动处理主备切换。
+    """
+    from core.llm_errors import classify_llm_exception
+    from core.llm_json import parse_llm_json
+
+    model_name = model_config.name
+    api_key = model_config.api_key or settings.LLM_API_KEY
+    api_base = model_config.api_base or settings.LLM_API_BASE
+    timeout = model_config.timeout or settings.LLM_TIMEOUT_SECONDS
+
+    if not api_key:
+        raise ValueError("API key not configured. Set OPENAI_API_KEY or LLM_API_KEY in .env file")
+
+    use_format = _should_use_response_format(json_mode)
+    max_attempts = max(1, settings.LLM_MAX_RETRIES_PER_MODEL)
+    last_exc: Exception | None = None
+    response_format_dropped = False
+
+    for attempt in range(max_attempts):
+        kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "api_key": api_key,
+            "api_base": api_base,
+        }
+        if use_format and not response_format_dropped:
+            kwargs["response_format"] = {"type": "json_object"}
+
         try:
-            response = await asyncio.wait_for(litellm.acompletion(**kwargs), timeout=settings.LLM_TIMEOUT_SECONDS)
-        except Exception as e:
-            if "response_format" in kwargs:
-                logger.warning(f"LLM response_format failed, retrying without it: {e}")
-                kwargs.pop("response_format", None)
-                response = await asyncio.wait_for(litellm.acompletion(**kwargs), timeout=settings.LLM_TIMEOUT_SECONDS)
-            else:
-                raise
-        latency_ms = (time.time() - start_time) * 1000
-        model_router.record_result(model, task_type, latency_ms=latency_ms)
-    except Exception as e:
-        latency_ms = (time.time() - start_time) * 1000
-        model_router.record_result(model, task_type, latency_ms=latency_ms, error=True)
-        raise
+            response = await asyncio.wait_for(
+                litellm.acompletion(**kwargs),
+                timeout=timeout,
+            )
+            content = _extract_content(response)
+            content = strip_reasoning_artifacts(content)
+            if json_mode:
+                return parse_llm_json(content)
+            return content
 
+        except Exception as exc:
+            last_exc = exc
+            info = classify_llm_exception(exc)
+
+            if use_format and not response_format_dropped and (
+                "response_format" in str(exc)
+                or "json" in str(exc).lower()
+                or info.code in {"json_error", "unknown"}
+            ):
+                logger.warning(
+                    "[%s] response_format 失败，自动降级到普通文本: %s",
+                    model_name, exc,
+                )
+                response_format_dropped = True
+                continue
+
+            if info.fatal or not info.retryable:
+                logger.error(
+                    "[%s] 致命/不可重试错误 [%s]: %s",
+                    model_name, info.code, exc,
+                )
+                raise
+
+            if attempt < max_attempts - 1:
+                delay = settings.LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "[%s] 第 %d 次失败 [%s]，%.1fs 后重试: %s",
+                    model_name, attempt + 1, info.code, delay, exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            raise
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("LLM call failed without exception")
+
+
+def _extract_content(response) -> str:
+    """从 LiteLLM response 中提取文本内容。"""
     content = response.choices[0].message.content
     if isinstance(content, list):
         parts = []
@@ -192,11 +313,8 @@ async def call_llm(
                     parts.append(item["text"])
             elif item:
                 parts.append(str(item))
-        content = "\n".join(parts)
-    content = strip_reasoning_artifacts(content)
-    if json_mode:
-        return parse_json_response(content)
-    return content
+        return "\n".join(parts)
+    return str(content or "")
 
 
 def route_model(task_type: TaskType) -> str:

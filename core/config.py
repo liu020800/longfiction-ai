@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = 120
     LLM_MAX_RETRIES: int = 3
     LLM_RETRY_BASE_DELAY: float = 1.0
+    # P0-2 / P1-2: 新增 LLM 调用稳定性配置
+    LLM_PROVIDER: str = Field(
+        default="openai_compatible",
+        validation_alias=AliasChoices("LLM_PROVIDER", "MODEL_PROVIDER"),
+    )
+    LLM_JSON_MODE_POLICY: str = "auto"  # auto | force | off
+    LLM_RETRY_ON_JSON_FAILURE: bool = True
+    LLM_MAX_RETRIES_PER_MODEL: int = 2
+    LLM_ROUTE_FALLBACK_ENABLED: bool = True
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     FAST_TEST_MODE: bool = False
     SKIP_DEEP_DEAI: bool = False
@@ -119,7 +128,15 @@ class Settings(BaseSettings):
     WORD_COUNT_ABSOLUTE_MIN: int = 200  # 字数绝对下限（硬地板）
 
     # ===== 业务上限（防止前端误传/UI 误设导致批量推到底）=====
-    MAX_TARGET_CHAPTERS: int = 50  # /api/init 收到超过此值时自动夹紧到此值
+    MAX_TARGET_CHAPTERS: int = 50  # 旧字段保留作兼容，新代码请用 DEFAULT / ABSOLUTE
+    MAX_TARGET_CHAPTERS_DEFAULT: int = 50  # 前端 UI 默认上限
+    MAX_TARGET_CHAPTERS_ABSOLUTE: int = 200  # 后端 API 绝对上限；超过直接 400
+
+    # ===== P0-3：JWT 密钥独立化 =====
+    JWT_SECRET_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("JWT_SECRET_KEY", "LONGFICTION_JWT_SECRET_KEY"),
+    )
 
     DB_URL: str = os.getenv("DATABASE_URL", "sqlite:///data/novel.db")
 
@@ -168,7 +185,29 @@ class Settings(BaseSettings):
             warnings.append("DeepSeek model id is configured with OpenAI official base URL")
         if "deepseek" in base and any(model.startswith("gpt-") for model in models):
             warnings.append("OpenAI model id is configured with DeepSeek base URL")
+        if not self.JWT_SECRET_KEY and not self.DEBUG:
+            warnings.append(
+                "JWT_SECRET_KEY 未配置：生产环境必须设置至少 32 位的独立密钥，"
+                "否则换 LLM Key 会导致全员登出"
+            )
         return warnings
+
+    def get_jwt_secret(self) -> str:
+        """获取 JWT 签发密钥。
+
+        优先级：
+        1. 显式配置的 `JWT_SECRET_KEY`（≥ 32 位）
+        2. DEBUG 模式下使用固定开发密钥（仅本地）
+        3. 生产环境未配置时抛 ValueError
+        """
+        if self.JWT_SECRET_KEY and len(self.JWT_SECRET_KEY) >= 32:
+            return self.JWT_SECRET_KEY
+        if self.DEBUG:
+            return "dev-longfiction-jwt-secret-change-me-please-32chars"
+        raise ValueError(
+            "生产环境必须配置 JWT_SECRET_KEY，长度至少 32 位。"
+            "在 .env 中设置 JWT_SECRET_KEY=<至少 32 位随机字符串> 后重启。"
+        )
 
     class Config:
         env_file = str(ENV_FILE_PATH)

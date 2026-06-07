@@ -20,6 +20,7 @@ from core.auth import (
     get_current_user, get_current_user_optional, require_role, deduct_balance,
     CHAPTER_COST,
 )
+from core.job_store import job_store
 from models.user_service import UserService
 from main_pipeline import MainPipeline
 from models.db_service import (
@@ -348,6 +349,34 @@ async def get_llm_config(current_user: dict = Depends(get_current_user)):
     }
 
 
+@app.get("/api/llm/test")
+async def test_llm(current_user: dict = Depends(get_current_user)):
+    """真实 LLM 可用性探针：先 chat 再 json，明确错误分类。"""
+    from core.llm_probe import probe_llm_all
+    result = await probe_llm_all()
+    if not result["ok"]:
+        raise HTTPException(status_code=503, detail=result)
+    return result
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: str, current_user: dict = Depends(get_current_user)):
+    """查询任务状态。"""
+    job = await job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/projects/{task_id}/jobs")
+async def list_project_jobs(task_id: str, current_user: dict = Depends(get_current_user)):
+    """列出项目所有任务。"""
+    return {
+        "task_id": task_id,
+        "jobs": await job_store.list_by_project(task_id),
+    }
+
+
 class LlmConfigUpdate(BaseModel):
     api_key: str = ""
     api_base: str = ""
@@ -501,48 +530,108 @@ async def get_config():
 
 
 @app.post("/api/init")
-async def init_pipeline(request: GenerationRequest, current_user: dict = Depends(get_current_user)):
-    # P2 程序级修复：业务上限夹紧
-    # 防止前端误传/UI 留旧值/默认 100 把章节数推到大结局
+async def init_pipeline(
+    request: GenerationRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    """P0-4：初始化改为后台 Job 模式，1 秒内返回 job_id。"""
     from core.config import settings as app_settings
-    if request.target_chapters > app_settings.MAX_TARGET_CHAPTERS:
-        logger.warning(
-            f"[/api/init] target_chapters={request.target_chapters} > MAX_TARGET_CHAPTERS={app_settings.MAX_TARGET_CHAPTERS}, "
-            f"clamping to {app_settings.MAX_TARGET_CHAPTERS}"
+    absolute_max = getattr(
+        app_settings, "MAX_TARGET_CHAPTERS_ABSOLUTE", app_settings.MAX_TARGET_CHAPTERS
+    )
+    if request.target_chapters > absolute_max:
+        raise HTTPException(
+            status_code=400,
+            detail=f"target_chapters 不能超过 {absolute_max}",
         )
-        request.target_chapters = app_settings.MAX_TARGET_CHAPTERS
     if request.target_chapters < 1:
         raise HTTPException(status_code=400, detail="target_chapters must be >= 1")
+
     task_id = str(uuid.uuid4())[:8]
-    monitor_id = _task_key(task_id, "init")
-    _set_task(monitor_id, project_id=task_id, task_type="init", label="生成项目设定", stage="生成世界观、角色与首阶段章节规划", progress=0.05)
+    job_id = await job_store.create(
+        project_id=task_id, job_type="init", label="生成项目设定"
+    )
+    background_tasks.add_task(
+        _run_init_job, job_id, task_id, request, current_user["id"]
+    )
+    return {
+        "status": "queued",
+        "task_id": task_id,
+        "job_id": job_id,
+        "message": "项目初始化任务已创建，请轮询 /api/jobs/{job_id}",
+    }
+
+
+async def _run_init_job(job_id: str, task_id: str, request: GenerationRequest, user_id: int):
+    """后台执行项目初始化。"""
+    from core.llm_probe import probe_llm_all
+
+    await job_store.update(job_id, status="running", stage="检查 LLM 配置", progress=0.05)
+    probe = await probe_llm_all()
+    if not probe["ok"]:
+        await job_store.update(
+            job_id,
+            status="failed",
+            stage="LLM 配置不可用",
+            progress=1.0,
+            error={
+                "error_type": probe.get("error_type"),
+                "message": probe.get("error"),
+                "chat": probe.get("chat"),
+            },
+        )
+        return
+
     pipeline = MainPipeline(session_id=task_id)
     try:
+        await job_store.update(
+            job_id, stage="生成世界观、角色与首阶段章节规划", progress=0.15
+        )
         result = await pipeline.initialize(request)
         actual_task_id = result.get("task_id", task_id)
         pipelines[actual_task_id] = pipeline
-        generation_tasks.pop(monitor_id, None)
+
+        with SessionLocal() as db:
+            us = UserService(db)
+            us.bind_project(user_id, actual_task_id, "owner")
+
+        monitor_id = _task_key(actual_task_id, "init")
         _complete_task(
-            _task_key(actual_task_id, "init"),
+            monitor_id,
             stage="项目设定草稿已生成",
             project_id=actual_task_id,
             type="init",
             label="生成项目设定",
         )
 
-        with SessionLocal() as db:
-            us = UserService(db)
-            us.bind_project(current_user["id"], actual_task_id, "owner")
-
-        return InitResponse(task_id=actual_task_id, status="initialized", result=result)
-    except Exception as e:
-        _fail_task(monitor_id, e)
-        logger.error(f"Init failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        await job_store.update(
+            job_id,
+            status="completed",
+            stage="项目设定草稿已生成",
+            progress=1.0,
+            result={"task_id": actual_task_id, "status": "initialized", "result": result},
+        )
+    except Exception as exc:
+        logger.exception("Init job failed")
+        monitor_id = _task_key(task_id, "init")
+        _fail_task(monitor_id, exc)
+        await job_store.update(
+            job_id,
+            status="failed",
+            stage="初始化失败",
+            progress=1.0,
+            error=str(exc)[:1000],
+        )
 
 
 @app.post("/api/chapter")
-async def generate_chapter(req: ChapterRequest, current_user: dict = Depends(get_current_user)):
+async def generate_chapter(
+    req: ChapterRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    """P0-4：章节生成改为后台 Job 模式，1 秒内返回 job_id。"""
     pipeline = get_or_load_pipeline(req.task_id)
     if not pipeline:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -552,35 +641,75 @@ async def generate_chapter(req: ChapterRequest, current_user: dict = Depends(get
         raise HTTPException(status_code=400, detail="chapter_index out of range")
     if not pipeline.approved:
         raise HTTPException(status_code=400, detail="Project settings are not approved")
-    # 顺序生成检查
     if req.chapter_index > 0:
         generated_indices = {c.chapter_index for c in pipeline.generated_chapters}
         missing = [i for i in range(req.chapter_index) if i not in generated_indices]
         if missing:
-            missing_str = ", ".join(str(i+1) for i in missing)
-            raise HTTPException(status_code=400, detail=f"顺序生成：第{req.chapter_index+1}章的前置章节尚未生成（缺第{missing_str}章），请先按顺序生成前面的章节")
-    monitor_id = _task_key(req.task_id, f"chapter_{req.chapter_index}")
-    _set_task(
-        monitor_id,
+            missing_str = ", ".join(str(i + 1) for i in missing)
+            raise HTTPException(
+                status_code=400,
+                detail=f"顺序生成：第{req.chapter_index + 1}章的前置章节尚未生成（缺第{missing_str}章），请先按顺序生成前面的章节",
+            )
+
+    job_id = await job_store.create(
         project_id=req.task_id,
-        task_type="chapter",
-        label=f"生成第{req.chapter_index + 1}章正文",
-        stage="写前规划、上下文检索与一致性预检",
-        progress=0.08,
-        chapter_index=req.chapter_index,
+        job_type=f"chapter_{req.chapter_index}",
+        label=f"生成第{req.chapter_index + 1}章",
     )
+    background_tasks.add_task(_run_chapter_job, job_id, req)
+    return {
+        "status": "queued",
+        "task_id": req.task_id,
+        "job_id": job_id,
+        "message": "章节生成任务已创建，请轮询 /api/jobs/{job_id}",
+    }
+
+
+async def _run_chapter_job(job_id: str, req: ChapterRequest):
+    """后台执行章节生成。"""
+    await job_store.update(job_id, status="running", stage="准备生成章节", progress=0.05)
+    pipeline = get_or_load_pipeline(req.task_id)
+    if not pipeline:
+        await job_store.update(
+            job_id, status="failed", stage="项目不存在", progress=1.0, error="Task not found"
+        )
+        return
+    monitor_id = _task_key(req.task_id, f"chapter_{req.chapter_index}")
     try:
-        generation_tasks[monitor_id].update({"stage": "正文生成、去AI痕迹与一致性检查", "progress": 0.35, "updated_at": _now_iso()})
-        draft = await pipeline.generate_chapter(0, req.chapter_index, req.multi_version, guidance=req.guidance, target_words=req.target_words, auto_finalize=req.auto_finalize)
-        _complete_task(monitor_id, stage="章节正文已保存", chapter=draft.model_dump(), catalog=pipeline.get_chapter_catalog())
-        return {"status": "success", "chapter": draft.model_dump(), "catalog": pipeline.get_chapter_catalog()}
-    except Exception as e:
+        await job_store.update(
+            job_id, stage="写前规划、上下文检索与一致性预检", progress=0.15
+        )
+        generation_tasks[monitor_id].update(
+            {"stage": "正文生成、去AI痕迹与一致性检查", "progress": 0.35, "updated_at": _now_iso()}
+        )
+        await job_store.update(
+            job_id, stage="正文生成、去AI痕迹与一致性检查", progress=0.35
+        )
+        draft = await pipeline.generate_chapter(
+            0, req.chapter_index, req.multi_version,
+            guidance=req.guidance, target_words=req.target_words,
+            auto_finalize=req.auto_finalize,
+        )
+        _complete_task(
+            monitor_id, stage="章节正文已保存",
+            chapter=draft.model_dump(), catalog=pipeline.get_chapter_catalog(),
+        )
+        await job_store.update(
+            job_id, status="completed", stage="章节正文已保存",
+            progress=1.0,
+            result={"chapter": draft.model_dump(), "catalog": pipeline.get_chapter_catalog()},
+        )
+    except Exception as exc:
+        logger.exception("Chapter job failed")
         try:
             pipeline.memory.clear_scene_context()
         except Exception:
             pass
-        _fail_task(monitor_id, e)
-        raise HTTPException(status_code=500, detail=str(e))
+        _fail_task(monitor_id, exc)
+        await job_store.update(
+            job_id, status="failed", stage="章节生成失败",
+            progress=1.0, error=str(exc)[:1000],
+        )
 
 
 @app.post("/api/chapter/regenerate")
@@ -986,14 +1115,18 @@ async def export_project_epub(task_id: str, finalized_only: bool = False, curren
 
 @app.post("/api/generate")
 async def generate_all(req: GenerateAllRequest, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
-    # P2 程序级修复：业务上限夹紧
+    """P1-3：超过 ABSOLUTE 上限直接 400 报错，不再静默 clamp。"""
     from core.config import settings as app_settings
-    if req.target_chapters > app_settings.MAX_TARGET_CHAPTERS:
-        logger.warning(
-            f"[/api/generate] target_chapters={req.target_chapters} > MAX_TARGET_CHAPTERS={app_settings.MAX_TARGET_CHAPTERS}, "
-            f"clamping to {app_settings.MAX_TARGET_CHAPTERS}"
+    absolute_max = getattr(
+        app_settings, "MAX_TARGET_CHAPTERS_ABSOLUTE", app_settings.MAX_TARGET_CHAPTERS
+    )
+    if req.target_chapters > absolute_max:
+        raise HTTPException(
+            status_code=400,
+            detail=f"target_chapters 不能超过 {absolute_max}",
         )
-        req.target_chapters = app_settings.MAX_TARGET_CHAPTERS
+    if req.target_chapters < 1:
+        raise HTTPException(status_code=400, detail="target_chapters must be >= 1")
     task_id = str(uuid.uuid4())[:8]
     generation_tasks[task_id] = {"status": "running", "progress": 0, "chapters": [], "project_id": task_id}
 
