@@ -13,6 +13,7 @@ from core.models import (
 from core.config import settings
 from core.word_counter import count_chinese_words, compute_deviation, allocate_scene_words, _rule_based_trim, CorrectionSnapshot, CorrectionHistory, CorrectionStrategy, evaluate_expand_quality, evaluate_trim_completeness, compute_style_drift, _repair_scene_boundaries
 from memory.memory_system import MemorySystem
+from memory.context_bridge import build_memory_context
 from rag.rag_engine import RAGEngine
 from agents.planner_agent import PlannerAgent
 from agents.world_builder import WorldBuilderAgent
@@ -23,6 +24,7 @@ from agents.style_rewriter import StyleRewriter, AIPatternDetector
 from agents.style_controller import StyleLearner, StylePreserver
 from agents.consistency_checker import ConsistencyChecker, ConsistencyGate, ConsistencyBlockError
 from agents.critic_agent import CriticAgent
+from agents.foreshadow_agent import extract_and_persist as _extract_and_persist_foreshadows
 from agents.enhancement.orchestrator import EnhancementOrchestrator
 from agents.enhancement.enhancement_config import EnhancementConfig
 from agents.enhancement.models import AnchorCategory, AnchorDefinition, ArcLevel, SuspenseArc
@@ -4280,7 +4282,13 @@ class MainPipeline:
         logger.info(f"Generating Chapter {chapter_idx+1}: {chapter_outline.title}")
 
         char_status = self.memory.structured.get_character_profiles_text()
-        context = self.memory.retrieve_context()
+        try:
+            context = self.memory.retrieve_context()
+        except Exception as exc:
+            logger.warning(f"retrieve_context failed, falling back to context_bridge: {exc}")
+            context = ""
+        if not context:
+            context = build_memory_context(self.memory, chapter_index=chapter_idx)
         control_context = self._get_story_control_context()
         state_context = self._get_character_state_context()
         if control_context:
@@ -4776,6 +4784,23 @@ class MainPipeline:
             if len(self.global_summary) > 3000:
                 self.global_summary = self.global_summary[-3000:]
         draft.finalize_errors = finalize_errors
+
+        # P2-B：LLM 伏笔提取（finalize hook，作为启发式的补充；失败不影响主流程）
+        # 仅在 LLM 已配置时跑，避免测试环境浪费时间
+        if getattr(settings, "LLM_API_KEY", None) and chapter_text:
+            try:
+                saved = await _extract_and_persist_foreshadows(
+                    chapter_idx=chapter_idx,
+                    chapter_text=chapter_text,
+                    pipeline=self,
+                )
+                if saved:
+                    logger.info(
+                        f"  P2-B: extracted {saved} LLM foreshadow(s) for chapter {chapter_idx+1}"
+                    )
+            except Exception as exc:
+                logger.warning(f"  P2-B foreshadow extraction skipped: {exc}")
+
         return draft
 
     async def regenerate_chapter(self, volume_idx: int, chapter_idx: int, multi_version: bool = False, guidance: str = "", target_words: int | None = None, auto_finalize: bool = True) -> ChapterDraft:
@@ -4788,7 +4813,13 @@ class MainPipeline:
         existing = next((c for c in self.generated_chapters if c.chapter_index == chapter_idx), None)
         if not existing:
             raise ValueError("Chapter not generated yet")
-        context = self.memory.retrieve_context()
+        try:
+            context = self.memory.retrieve_context()
+        except Exception as exc:
+            logger.warning(f"retrieve_context failed, falling back to context_bridge: {exc}")
+            context = ""
+        if not context:
+            context = build_memory_context(self.memory, chapter_index=chapter_idx)
         control_context = self._get_story_control_context()
         state_context = self._get_character_state_context()
         if control_context:
